@@ -24,6 +24,7 @@ bun.lock
 out
 dist
 dist-web
+false
 
 # 环境变量（保留 .env.development 作为模板）
 .env
