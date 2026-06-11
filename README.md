@@ -48,3 +48,4 @@ npm run dev
 ## 声明
 
 本软件仅用于学习交流，禁止用于商业用途，否则后果自负。
+本项目来源于AlgerMusicPlayer，感谢作者的开源，如果想使用原项目，请移步[AlgerMusicPlayer](https://github.com/algerkong/AlgerMusicPlayer)
