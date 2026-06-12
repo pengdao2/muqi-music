@@ -251,10 +251,20 @@ const initializeScript = async (script: string, scriptInfo: LxScriptInfo) => {
 
   (globalThis as any).lx = createLxApi(scriptInfo);
 
+  // 包装脚本，捕获内部异常并通过 lx.send('inited') 机制上报
+  // 使用 JSON.stringify 安全转义脚本内容，避免脚本中的反引号和 ${} 破坏模板字符串
   const sandboxScript = `
-    const globalThisRef = globalThis;
-    const lx = globalThis.lx;
-    ${script}
+    "use strict";
+    try {
+      (0, eval)(${JSON.stringify(script)});
+    } catch (err) {
+      globalThis.lx.send('inited', {
+        openDevTools: false,
+        sources: {},
+        _error: err instanceof Error ? err.message : String(err)
+      });
+      throw err;
+    }
     export {};
   `;
   const scriptUrl = URL.createObjectURL(
@@ -266,8 +276,11 @@ const initializeScript = async (script: string, scriptInfo: LxScriptInfo) => {
   try {
     await import(/* @vite-ignore */ scriptUrl);
     if (!initialized) {
-      throw new Error('脚本未调用 lx.send(EVENT_NAMES.inited, data)');
+      throw new Error('脚本未调用 lx.send(EVENT_NAMES.inited, data)。请确认脚本格式正确：导入的脚本必须是以 /* @name xxx */ 开头的落雪音乐音源脚本，并在脚本中调用 lx.send(lx.EVENT_NAMES.inited, { sources: {...} })');
     }
+  } catch (error) {
+    // 重新抛出以确保主线程能捕获
+    throw error;
   } finally {
     URL.revokeObjectURL(scriptUrl);
   }

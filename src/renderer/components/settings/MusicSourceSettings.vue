@@ -109,6 +109,7 @@
                   {{ t('settings.playback.lxMusic.scripts.title') }}
                 </h3>
                 <button
+                  v-if="isElectron"
                   @click="importLxMusicScript"
                   class="flex items-center gap-1 px-2.5 py-1 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-medium rounded-lg transition-colors"
                 >
@@ -235,6 +236,15 @@
                 {{ t('settings.playback.lxMusic.scripts.importHint') }}
               </p>
 
+              <!-- 隐藏的文件选择器（Web端用） -->
+              <input
+                ref="customApiFileInputRef"
+                type="file"
+                accept=".json"
+                class="hidden"
+                @change="handleWebImportPlugin"
+              />
+
               <button
                 @click="importPlugin"
                 class="px-5 py-2 bg-violet-500 hover:bg-violet-600 text-white text-sm font-medium rounded-xl transition-colors flex items-center gap-2 shadow-lg shadow-violet-500/20"
@@ -289,6 +299,7 @@ import { computed, nextTick, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import ResponsiveModal from '@/components/common/ResponsiveModal.vue';
+import { CacheManager } from '@/api/musicParser';
 import {
   initLxMusicRunner,
   parseScriptInfo,
@@ -297,6 +308,7 @@ import {
 import { useSettingsStore } from '@/store';
 import type { LxMusicScriptConfig, LxScriptInfo, LxSourceKey } from '@/types/lxMusic';
 import { type Platform } from '@/types/music';
+import { isElectron } from '@/utils';
 import { useMusicSources } from '@/utils/musicSourceConfig';
 
 // ==================== Props & Emits ====================
@@ -405,23 +417,68 @@ const toggleSource = (sourceKey: string) => {
   }
 };
 
+const customApiFileInputRef = ref<HTMLInputElement | null>(null);
+
 /**
  * 导入自定义API插件
  */
 const importPlugin = async () => {
-  try {
-    const result = await window.api.importCustomApiPlugin();
-    if (result && result.name && result.content) {
-      settingsStore.setCustomApiPlugin(result);
-      message.success(t('settings.playback.customApi.importSuccess', { name: result.name }));
-
-      // 导入成功后自动勾选
-      if (!selectedSources.value.includes('custom')) {
-        selectedSources.value.push('custom');
+  if (isElectron) {
+    // Electron 端：通过系统文件对话框
+    try {
+      const result = await window.api.importCustomApiPlugin();
+      if (result && result.name && result.content) {
+        applyCustomApiPlugin(result.name, result.content);
       }
+    } catch (error: any) {
+      message.error(t('settings.playback.customApi.importFailed', { message: error.message }));
     }
-  } catch (error: any) {
-    message.error(t('settings.playback.customApi.importFailed', { message: error.message }));
+  } else {
+    // Web 端：通过 HTML5 文件选择器
+    customApiFileInputRef.value?.click();
+  }
+};
+
+/**
+ * Web 端处理文件导入
+ */
+const handleWebImportPlugin = (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const content = e.target?.result as string;
+    try {
+      const pluginData = JSON.parse(content);
+      if (!pluginData.name || !pluginData.apiUrl) {
+        throw new Error('无效的插件文件，缺少 name 或 apiUrl 字段。');
+      }
+      applyCustomApiPlugin(pluginData.name, content);
+    } catch (error: any) {
+      message.error(`文件读取或解析失败: ${error.message}`);
+    }
+  };
+  reader.onerror = () => {
+    message.error('文件读取失败');
+  };
+  reader.readAsText(file);
+
+  // 重置 input 以允许重复选择同一文件
+  input.value = '';
+};
+
+/**
+ * 应用自定义 API 插件（Electron 和 Web 共用）
+ */
+const applyCustomApiPlugin = (name: string, content: string) => {
+  settingsStore.setCustomApiPlugin({ name, content });
+  message.success(t('settings.playback.customApi.importSuccess', { name }));
+
+  // 导入成功后自动勾选
+  if (!selectedSources.value.includes('custom')) {
+    selectedSources.value.push('custom');
   }
 };
 
@@ -653,9 +710,13 @@ const saveScriptName = (apiId: string) => {
  * 确认选择
  */
 const handleConfirm = () => {
-  const defaultPlatforms: Platform[] = ['migu', 'kugou', 'kuwo', 'pyncmd'];
+  const defaultPlatforms: Platform[] = ['migu', 'kugou', 'kuwo', 'pyncmd', 'gdmusic', 'lxMusic'];
   const valuesToEmit =
     selectedSources.value.length > 0 ? [...new Set(selectedSources.value)] : defaultPlatforms;
+
+  // 音源配置变更时，清除所有失败缓存，避免旧的失败记录阻止新音源尝试
+  CacheManager.clearAllFailedCache();
+
   emit('update:sources', valuesToEmit);
   visible.value = false;
 };

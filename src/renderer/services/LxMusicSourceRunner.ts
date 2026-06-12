@@ -416,40 +416,42 @@ export class LxMusicSourceRunner {
       };
     }
 
-    const controller = new AbortController();
-    const fetchOptions: RequestInit = {
-      method: options.method || 'GET',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        ...options.headers
-      },
-      signal: controller.signal,
-      mode: 'cors',
-      credentials: 'omit'
-    };
+    // 浏览器环境通过 CORS 代理发送请求（绕过跨域限制）
+    const CORS_PROXY = 'https://corsproxy.io/?';
+    const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
 
-    if (options.body) {
-      fetchOptions.body = options.body;
-    } else if (options.form) {
-      fetchOptions.body = new URLSearchParams(options.form);
-      fetchOptions.headers = {
-        ...fetchOptions.headers,
-        'Content-Type': 'application/x-www-form-urlencoded'
+    const doFetch = async (fetchUrl: string): Promise<boolean> => {
+      const controller = new AbortController();
+      const fetchOptions: RequestInit = {
+        method: options.method || 'GET',
+        headers: {
+          ...options.headers
+        },
+        signal: controller.signal
       };
-    } else if (options.formData) {
-      const formData = new FormData();
-      for (const [key, value] of Object.entries(options.formData)) {
-        formData.append(key, value as string);
+
+      if (options.body) {
+        fetchOptions.body = options.body;
+      } else if (options.form) {
+        fetchOptions.body = new URLSearchParams(options.form);
+        fetchOptions.headers = {
+          ...fetchOptions.headers,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        };
+      } else if (options.formData) {
+        const formData = new FormData();
+        for (const [key, value] of Object.entries(options.formData)) {
+          formData.append(key, value as string);
+        }
+        fetchOptions.body = formData;
       }
-      fetchOptions.body = formData;
-    }
 
-    const timeoutId = window.setTimeout(() => {
-      controller.abort();
-    }, timeout);
+      const timeoutId = window.setTimeout(() => {
+        controller.abort();
+      }, timeout);
 
-    fetch(url, fetchOptions)
-      .then(async (response) => {
+      try {
+        const response = await fetch(fetchUrl, fetchOptions);
         clearTimeout(timeoutId);
         const rawBody = await response.text();
 
@@ -476,13 +478,28 @@ export class LxMusicSourceRunner {
           },
           parsedBody
         );
-      })
-      .catch((error) => {
+        return true;
+      } catch (error) {
         clearTimeout(timeoutId);
-        callback(error, null, null);
-      });
+        return false;
+      }
+    };
 
-    return () => controller.abort();
+    // 先尝试直连，失败后走 CORS 代理
+    doFetch(url).then((directOk) => {
+      if (!directOk) {
+        console.log(`[LxMusicRunner] 直连失败，尝试 CORS 代理: ${proxyUrl.substring(0, 80)}...`);
+        doFetch(proxyUrl).then((proxyOk) => {
+          if (!proxyOk) {
+            callback(new Error('直连和代理均失败'), null, null);
+          }
+        });
+      }
+    });
+
+    return () => {
+      // 浏览器环境无法真正取消 fetch，但可忽略回调
+    };
   }
 
   /**

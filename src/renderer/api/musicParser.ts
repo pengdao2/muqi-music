@@ -154,6 +154,15 @@ export class CacheManager {
   }
 
   /**
+   * 清除所有失败缓存（音源配置变更时调用）
+   */
+  static clearAllFailedCache(): void {
+    const count = failedCacheMap.size;
+    failedCacheMap.clear();
+    console.log(`清除全部失败缓存: ${count} 项`);
+  }
+
+  /**
    * 清除指定歌曲的所有缓存
    */
   static async clearMusicCache(id: number): Promise<void> {
@@ -386,6 +395,8 @@ class UnblockMusicStrategy implements MusicSourceStrategy {
   priority = 4;
 
   canHandle(sources: string[]): boolean {
+    // UnblockMusic 依赖 Electron IPC (window.api.unblockMusic)，非 Electron 环境跳过
+    if (!isElectron) return false;
     const unblockSources = sources.filter((source) => !['custom', 'gdmusic'].includes(source));
     return unblockSources.length > 0;
   }
@@ -500,12 +511,6 @@ export class MusicParser {
     const startTime = performance.now();
 
     try {
-      // 非Electron环境直接使用API请求
-      if (!isElectron) {
-        console.log('非Electron环境，使用API请求');
-        return await requestMusic.get<any>('/music', { params: { id } });
-      }
-
       // 获取设置存储
       let settingsStore: any;
       try {

@@ -28,7 +28,7 @@ import { checkLoginStatus } from '@/utils/auth';
 
 import { initAudioListeners, initMusicHook } from './hooks/MusicHook';
 import { audioService } from './services/audioService';
-import { initLxMusicRunner } from './services/LxMusicSourceRunner';
+import { initLxMusicRunner, parseScriptInfo } from './services/LxMusicSourceRunner';
 import { isMobile } from './utils';
 import { useAppShortcuts } from './utils/appShortcuts';
 
@@ -152,34 +152,92 @@ onMounted(async () => {
   // 初始化音频设备变化监听器
   playerCoreStore.initAudioDeviceListener();
 
-  // 初始化落雪音源（如果有激活的音源，需要用户确认）
+  // 初始化落雪音源（如果有激活的音源）
+  const LX_SCRIPT_CONFIRMED_KEY = 'lx_script_confirmed_id';
   const activeLxApiId = settingsStore.setData?.activeLxMusicApiId;
   if (activeLxApiId) {
     const lxMusicScripts = settingsStore.setData?.lxMusicScripts || [];
     const activeScript = lxMusicScripts.find((script: any) => script.id === activeLxApiId);
     if (activeScript && activeScript.script) {
-      // 延迟弹出确认对话框，等 UI 渲染完毕
-      setTimeout(async () => {
-        const { dialog } = createDiscreteApi(['dialog']);
-        dialog.warning({
-          title: '请牧柒对脚本确认',
-          content: `检测到激活的落雪音源「${activeScript.name}」，该脚本由第三方提供，可能在沙箱中执行代码。是否允许加载？`,
-          positiveText: '允许加载',
-          negativeText: '禁用',
-          onPositiveClick: async () => {
-            try {
-              console.log('[App] 用户确认，初始化落雪音源:', activeScript.name);
-              await initLxMusicRunner(activeScript.script);
-            } catch (error) {
-              console.error('[App] 初始化落雪音源失败:', error);
+      const confirmedId = localStorage.getItem(LX_SCRIPT_CONFIRMED_KEY);
+
+      if (confirmedId === activeLxApiId) {
+        // 已确认过的脚本，直接初始化，无需弹窗
+        try {
+          console.log('[App] 自动初始化落雪音源:', activeScript.name);
+          await initLxMusicRunner(activeScript.script);
+        } catch (error) {
+          console.error('[App] 初始化落雪音源失败:', error);
+        }
+      } else {
+        // 首次使用或脚本已变更，需要用户确认
+        setTimeout(async () => {
+          const { dialog } = createDiscreteApi(['dialog']);
+          dialog.warning({
+            title: '请对脚本确认',
+            content: `检测到激活的落雪音源「${activeScript.name}」，该脚本由第三方提供，可能在沙箱中执行代码。是否允许加载？`,
+            positiveText: '允许加载',
+            negativeText: '禁用',
+            onPositiveClick: async () => {
+              try {
+                console.log('[App] 用户确认，初始化落雪音源:', activeScript.name);
+                localStorage.setItem(LX_SCRIPT_CONFIRMED_KEY, activeLxApiId);
+                await initLxMusicRunner(activeScript.script);
+              } catch (error) {
+                console.error('[App] 初始化落雪音源失败:', error);
+              }
+            },
+            onNegativeClick: () => {
+              console.log('[App] 用户拒绝加载落雪音源，已禁用');
+              settingsStore.setData.activeLxMusicApiId = undefined;
             }
-          },
-          onNegativeClick: () => {
-            console.log('[App] 用户拒绝加载落雪音源，已禁用');
-            settingsStore.setData.activeLxMusicApiId = undefined;
-          }
-        });
-      }, 2000);
+          });
+        }, 2000);
+      }
+    }
+  }
+
+  // 如果没有落雪音源脚本，尝试从默认 URL 拉取
+  const lxMusicScripts = settingsStore.setData?.lxMusicScripts || [];
+  if (lxMusicScripts.length === 0) {
+    const defaultScriptUrl = settingsStore.setData?.defaultLxMusicScriptUrl;
+    if (defaultScriptUrl) {
+      console.log('[App] 检测到默认落雪脚本 URL，尝试拉取...');
+      try {
+        const res = await fetch(defaultScriptUrl);
+        if (res.ok) {
+          const scriptContent = await res.text();
+          const scriptInfo = parseScriptInfo(scriptContent);
+          // 先初始化 runner 获取 sources
+          const tmpRunner = await initLxMusicRunner(scriptContent);
+          const sources = tmpRunner.getSources();
+          const sourceKeys = Object.keys(sources);
+          const scriptId = `lx_default_${Date.now()}`;
+
+          const newScript = {
+            id: scriptId,
+            name: scriptInfo.name || '默认音源',
+            script: scriptContent,
+            info: scriptInfo,
+            sources: sourceKeys,
+            enabled: true,
+            createdAt: Date.now()
+          };
+
+          settingsStore.setSetData({
+            lxMusicScripts: [newScript],
+            activeLxMusicApiId: scriptId
+          });
+
+          // 自动确认（默认脚本）
+          localStorage.setItem(LX_SCRIPT_CONFIRMED_KEY, scriptId);
+          console.log('[App] 默认落雪音源已自动配置:', scriptInfo.name);
+
+          // runner 已在上面初始化，无需再次初始化
+        }
+      } catch (err) {
+        console.warn('[App] 拉取默认落雪脚本失败:', err);
+      }
     }
   }
 
