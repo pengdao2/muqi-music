@@ -12,7 +12,7 @@ import { parseFromGDMusic } from './gdmusic';
 import { LxMusicStrategy } from './lxMusicStrategy';
 import { parseFromCustomApi } from './parseFromCustomApi';
 
-const { saveData, getData, deleteData } = musicDB;
+const { saveData, getData, deleteData, getAllData } = musicDB;
 
 /**
  * 音乐解析结果接口
@@ -184,6 +184,60 @@ export class CacheManager {
       console.log(`清除歌曲 ${id} 的失败缓存`);
     } catch (error) {
       console.error('清除缓存失败:', error);
+    }
+  }
+
+  /**
+   * 清除所有缓存（包括 IndexedDB URL缓存、失败缓存和内存失败缓存）
+   * 当一首歌播放失败时调用，确保重新解析时不使用任何过期或失效的缓存
+   */
+  static async clearAllCache(): Promise<void> {
+    console.log('======= 开始清除所有音乐缓存 =======');
+    try {
+      // 1. 清除所有 IndexedDB 中的 URL 缓存 (music_url_cache)
+      try {
+        const allUrlCache = await getAllData('music_url_cache');
+        if (allUrlCache && Array.isArray(allUrlCache)) {
+          for (const item of allUrlCache) {
+            try {
+              await deleteData('music_url_cache', (item as any).id);
+            } catch {
+              // 忽略
+            }
+          }
+          console.log(`清除 ${allUrlCache.length} 条 IndexedDB URL 缓存`);
+        } else {
+          console.log('IndexedDB URL 缓存为空，无需清除');
+        }
+      } catch (e) {
+        console.warn('清除 IndexedDB URL 缓存失败:', e);
+      }
+
+      // 2. 清除所有 IndexedDB 中的失败缓存 (music_failed_cache)
+      try {
+        const allFailedCache = await getAllData('music_failed_cache');
+        if (allFailedCache && Array.isArray(allFailedCache)) {
+          for (const item of allFailedCache) {
+            try {
+              await deleteData('music_failed_cache', (item as any).id);
+            } catch {
+              // 忽略
+            }
+          }
+          console.log(`清除 ${allFailedCache.length} 条 IndexedDB 失败缓存`);
+        } else {
+          console.log('IndexedDB 失败缓存为空，无需清除');
+        }
+      } catch (e) {
+        console.warn('清除 IndexedDB 失败缓存失败:', e);
+      }
+
+      // 3. 清除所有内存失败缓存
+      CacheManager.clearAllFailedCache();
+
+      console.log('======= 所有音乐缓存已清除 =======');
+    } catch (error) {
+      console.error('清除所有缓存时出错:', error);
     }
   }
 }

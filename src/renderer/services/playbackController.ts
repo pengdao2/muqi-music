@@ -12,6 +12,7 @@ import { createDiscreteApi } from 'naive-ui';
 
 import i18n from '@/../i18n/renderer';
 import { getParsingMusicUrl } from '@/api/music';
+import { CacheManager } from '@/api/musicParser';
 import { loadLrc, useSongDetail } from '@/hooks/usePlayerHooks';
 import { audioService } from '@/services/audioService';
 import { playbackRequestManager } from '@/services/playbackRequestManager';
@@ -305,6 +306,49 @@ export const playTrack = async (
       }
     }
 
+    // ======== 清空所有缓存并重新尝试播放 ========
+    console.log('[playbackController] 播放失败，清空所有缓存并重新尝试...');
+    try {
+      await CacheManager.clearAllCache();
+
+      // 重新获取歌曲详情（URL），不使用缓存
+      const { getSongDetail } = useSongDetail();
+      const retryMusic = { ...originalMusic, playMusicUrl: undefined, expiredAt: undefined };
+      const updatedPlayMusic = await getSongDetail(retryMusic, requestId);
+
+      if (gen !== generation) {
+        console.log(`[playbackController] gen=${gen} 已过期（重试获取详情后），当前 gen=${generation}`);
+        return false;
+      }
+
+      if (updatedPlayMusic.playMusicUrl) {
+        console.log('[playbackController] 缓存清空后重新获取URL成功，重新尝试播放...');
+        updatedPlayMusic.lyric = music.lyric;
+        playerCore.playMusic = updatedPlayMusic;
+        playerCore.playMusicUrl = updatedPlayMusic.playMusicUrl as string;
+
+        // 重新尝试播放
+        const retrySuccess = await loadAndPlayAudio(updatedPlayMusic, shouldPlay);
+
+        if (gen !== generation) {
+          audioService.stop();
+          return false;
+        }
+
+        if (retrySuccess) {
+          playerCore.playMusic.playLoading = false;
+          playerCore.playMusic.isFirstPlay = false;
+          playbackRequestManager.completeRequest(requestId);
+          console.log(`[playbackController] 清空缓存后重试播放成功: ${music.name}`);
+          return true;
+        }
+      } else {
+        console.warn('[playbackController] 清空缓存后仍无法获取播放URL');
+      }
+    } catch (retryError) {
+      console.error('[playbackController] 清空缓存重试失败:', retryError);
+    }
+
     message.error(i18n.global.t('player.playFailed'));
     if (playerCore.playMusic) {
       playerCore.playMusic.playLoading = false;
@@ -413,6 +457,10 @@ export const setupUrlExpiredHandler = (): void => {
     }
 
     try {
+      // ======== 清空所有缓存 ========
+      console.log('[playbackController] URL过期，清空所有缓存...');
+      await CacheManager.clearAllCache();
+
       const trackToPlay: SongResult = {
         ...expiredTrack,
         isFirstPlay: true,

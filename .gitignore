@@ -56,3 +56,6 @@ AGENTS.md
 
 src/renderer/auto-imports.d.ts
 src/renderer/components.d.ts
+
+# deploy-web 部署包
+deploy-web/node_modules
