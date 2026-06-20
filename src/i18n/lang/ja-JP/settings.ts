@@ -173,6 +173,8 @@ export default {
     remoteControlDesc: 'リモートコントロール機能を設定'
   },
   network: {
+    apiUrl: 'Music API URL',
+    apiUrlDesc: 'APIサーバーアドレスを設定。例: http://ip:port',
     apiPort: '音楽APIポート',
     apiPortDesc: '変更後はアプリの再起動が必要です',
     proxy: 'プロキシ設定',

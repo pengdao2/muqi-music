@@ -162,6 +162,24 @@ export class LxMusicSourceRunner {
   // 临时存储最后一次 HTTP 请求返回的音乐 URL（用于脚本返回 undefined 时的后备）
   private lastMusicUrl: string | null = null;
 
+  /**
+   * 双向日志：同时输出到 console 和 Android Bridge
+   * Android Bridge 日志直接输出到 logcat (标签 MuqiBridge)，不受 WebView console 限制
+   */
+  private bridgeLog(level: 'log' | 'warn' | 'error' | 'info', ...args: any[]): void {
+    const bridge = (window as any).AndroidBridge;
+    const prefix = '[LxMusicRunner]';
+    const message = [prefix, ...args].join(' ');
+
+    // console 输出（WebView → logcat 标签 MuqiWebView）
+    console[level](prefix, ...args);
+
+    // Android Bridge 直接输出（logcat 标签 MuqiBridge），更可靠
+    if (bridge && typeof bridge.log === 'function') {
+      bridge.log(message);
+    }
+  }
+
   constructor(script: string) {
     this.script = script;
     this.scriptInfo = parseScriptInfo(script);
@@ -182,26 +200,91 @@ export class LxMusicSourceRunner {
   }
 
   private ensureWorker(): Worker {
+    this.bridgeLog('log', 'ensureWorker 被调用, worker exists:', !!this.worker);
     if (this.worker) {
       return this.worker;
     }
 
-    const worker = new Worker(new URL('./workers/lxScriptSandbox.worker.ts', import.meta.url), {
-      type: 'module'
-    });
+    // Android 原生环境：Chromium file:// 协议禁止创建任何 Worker（包括 classic 模式）
+    // 解决方式：通过 Android Bridge 读取 Worker JS 文件内容，转为 Blob URL 创建 Worker
+    const win = (typeof window !== 'undefined' ? window : self) as any;
+    const bridge = win.AndroidBridge;
+    this.bridgeLog('log', 'bridge available:', !!bridge, typeof bridge?.readAssetFile);
 
+    // 检查是否有 Android Bridge 的 readAssetFile 方法（Android 原生环境特有）
+    if (bridge && typeof bridge.readAssetFile === 'function') {
+      this.bridgeLog('log', '检测到 Android 原生环境，使用 Bridge + Blob URL 创建 Worker');
+      return this.ensureWorkerViaBridge();
+    }
+
+    // Web / Electron 环境：使用标准 URL 创建 classic Worker
+    // ⚠️ 必须保持 new Worker(new URL(...)) 模式，Vite 才能正确解析为 .js chunk
+    this.bridgeLog('log', '使用标准 Worker URL');
+    const worker = new Worker(new URL('./workers/lxScriptSandbox.worker.ts', import.meta.url));
+
+    this.setupWorkerEvents(worker);
+    this.worker = worker;
+    return worker;
+  }
+
+  /**
+   * Android 原生环境：通过 Bridge 读取 Worker 文件内容 → Blob URL → 创建 Worker
+   *
+   * 原因：Chromium WebView 不允许从 file:///android_asset/ 加载 Worker（包括 classic 模式）。
+   *
+   * 难点：不能直接用 new URL('./workers/lxScriptSandbox.worker.ts') 获取 .js chunk 路径，
+   * Vite 只在 new Worker(new URL(...)) 上下文解析为最终 .js chunk，
+   * 在非 Worker 上下文解析为中间 .ts 文件（包含 import 语句，classic Worker 无法执行）。
+   * 因此通过读取 HTML 找到主入口 chunk，从中提取 Worker .js 文件名。
+   */
+  private ensureWorkerViaBridge(): Worker {
+    const bridge = (window as any).AndroidBridge;
+
+    // Step 1: 读取 index.html → 找主入口 JS chunk 名称
+    const htmlContent = bridge.readAssetFile('public/index.html');
+    if (!htmlContent) throw new Error('无法读取 public/index.html');
+
+    const entryMatch = htmlContent.match(/src="\.\/assets\/(index-[^.]+\.js)"/);
+    if (!entryMatch) throw new Error('无法从 index.html 找到主入口 chunk');
+
+    const entryChunk = `public/assets/${entryMatch[1]}`;
+    this.bridgeLog('log', '主入口 chunk:', entryChunk);
+
+    // Step 2: 读取主入口 chunk → 搜索 Worker JS 文件名
+    const entryContent = bridge.readAssetFile(entryChunk);
+    if (!entryContent) throw new Error(`无法读取 ${entryChunk}`);
+
+    const workerMatch = entryContent.match(/lxScriptSandbox\.worker-([\w-]+)\.js/);
+    if (!workerMatch) throw new Error('无法从入口 chunk 找到 Worker JS 引用');
+
+    const workerAssetPath = `public/assets/lxScriptSandbox.worker-${workerMatch[1]}.js`;
+    this.bridgeLog('log', 'Worker JS 路径:', workerAssetPath);
+
+    // Step 3: 读取 Worker JS 内容 → Blob URL → 创建 Worker
+    const workerCode = bridge.readAssetFile(workerAssetPath);
+    if (!workerCode) throw new Error(`无法通过 Bridge 读取 Worker 脚本: ${workerAssetPath}`);
+
+    const blob = new Blob([workerCode], { type: 'application/javascript' });
+    const blobUrl = URL.createObjectURL(blob);
+    this.bridgeLog('log', '通过 Blob URL 创建 Worker, blobUrl:', blobUrl);
+
+    const worker = new Worker(blobUrl);
+
+    this.setupWorkerEvents(worker);
+    this.worker = worker;
+    return worker;
+  }
+
+  private setupWorkerEvents(worker: Worker): void {
     worker.onmessage = (event: MessageEvent<WorkerToRunnerMessage>) => {
       this.handleWorkerMessage(event.data);
     };
     worker.onerror = (event) => {
       const message = event.message || '脚本 Worker 运行错误';
-      console.error('[LxMusicRunner] Worker error:', message);
+      this.bridgeLog('error', 'Worker error:', message);
       this.rejectInitialization(new Error(message));
       this.rejectAllInvocations(new Error(message));
     };
-
-    this.worker = worker;
-    return worker;
   }
 
   private clearInitState() {
@@ -253,6 +336,7 @@ export class LxMusicSourceRunner {
   }
 
   private postToWorker(message: RunnerToWorkerMessage) {
+    this.bridgeLog('log', 'postToWorker 发送消息:', message.type);
     const worker = this.ensureWorker();
     worker.postMessage(message);
   }
@@ -354,6 +438,7 @@ export class LxMusicSourceRunner {
    * 初始化执行器
    */
   async initialize(): Promise<LxInitedData> {
+    this.bridgeLog('log', `initialize 开始, 脚本: ${this.scriptInfo.name}, initPromise: ${!!this.initPromise}, initialized: ${this.initialized}`);
     if (this.initPromise) return this.initPromise;
     if (this.initialized) {
       return {
@@ -685,6 +770,12 @@ export const setLxMusicRunner = (runner: LxMusicSourceRunner | null): void => {
  * 初始化落雪音源执行器（从脚本内容）
  */
 export const initLxMusicRunner = async (script: string): Promise<LxMusicSourceRunner> => {
+  const bridge = (window as any).AndroidBridge;
+  if (bridge?.log) {
+    bridge.log(`[LxMusicRunner] initLxMusicRunner 被调用, script length: ${script.length}`);
+  }
+  console.log('[LxMusicRunner] initLxMusicRunner 被调用, script length:', script.length);
+
   if (runnerInstance) {
     runnerInstance.dispose();
   }

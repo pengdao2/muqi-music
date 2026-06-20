@@ -92,6 +92,25 @@ const loadAndPlayAudio = async (song: SongResult, shouldPlay: boolean): Promise<
     throw new Error('歌曲没有播放URL');
   }
 
+  // Android content:// URI 需要转换为 base64 data URL（HTML5 Audio 不支持 content://）
+  let playUrl = song.playMusicUrl;
+  if (playUrl.startsWith('content://')) {
+    const bridge = (window as any).AndroidBridge;
+    const filePath = (song as any).filePath || (song as any).path;
+    if (bridge?.readAudioFileAsDataUrl && filePath) {
+      try {
+        playUrl = bridge.readAudioFileAsDataUrl(filePath);
+        console.log(`[playbackController] content:// URI 已转为 data URL, 大小: ${playUrl.length}`);
+      } catch (e) {
+        console.error('[playbackController] 转换 content:// URI 失败:', e);
+        throw new Error('无法读取本地音频文件');
+      }
+    } else {
+      console.warn('[playbackController] 无法转换 content:// URI, bridge 或 filePath 不可用');
+      throw new Error('无法读取本地音频文件');
+    }
+  }
+
   // 检查保存的进度
   let initialPosition = 0;
   const savedProgress = JSON.parse(localStorage.getItem('playProgress') || '{}');
@@ -102,7 +121,7 @@ const loadAndPlayAudio = async (song: SongResult, shouldPlay: boolean): Promise<
 
   // 直接通过 audioService 播放（单一 audio 元素，换 src 即可）
   console.log(`[playbackController] 开始播放: ${song.name}`);
-  await audioService.play(song.playMusicUrl, song, shouldPlay, initialPosition || 0);
+  await audioService.play(playUrl, song, shouldPlay, initialPosition || 0);
 
   // 发布音频就绪事件
   window.dispatchEvent(
@@ -313,7 +332,15 @@ export const playTrack = async (
 
       // 重新获取歌曲详情（URL），不使用缓存
       const { getSongDetail } = useSongDetail();
-      const retryMusic = { ...originalMusic, playMusicUrl: undefined, expiredAt: undefined };
+      // 本地 content:// 或 local:// URL 不需要重试获取，保留原值
+      const isLocalUrl = originalMusic.playMusicUrl?.startsWith('content://') ||
+                         originalMusic.playMusicUrl?.startsWith('local://') ||
+                         originalMusic.playMusicUrl?.startsWith('data:');
+      const retryMusic = {
+        ...originalMusic,
+        playMusicUrl: isLocalUrl ? originalMusic.playMusicUrl : undefined,
+        expiredAt: isLocalUrl ? originalMusic.expiredAt : undefined
+      };
       const updatedPlayMusic = await getSongDetail(retryMusic, requestId);
 
       if (gen !== generation) {

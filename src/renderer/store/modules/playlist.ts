@@ -521,7 +521,10 @@ export const usePlaylistStore = defineStore(
         const nextSong = { ...playList.value[nowPlayListIndex] };
 
         // Force refresh URL on retry
-        if (retryCount > 0 && !nextSong.playMusicUrl?.startsWith('local://')) {
+        const isLocal = nextSong.playMusicUrl?.startsWith('local://') ||
+                        nextSong.playMusicUrl?.startsWith('content://') ||
+                        nextSong.playMusicUrl?.startsWith('data:');
+        if (retryCount > 0 && !isLocal) {
           nextSong.playMusicUrl = undefined;
           nextSong.expiredAt = undefined;
         }
@@ -627,7 +630,10 @@ export const usePlaylistStore = defineStore(
 
         // Check URL expiration
         if (song.expiredAt && song.expiredAt < Date.now()) {
-          if (!song.playMusicUrl?.startsWith('local://')) {
+          const isLocal = song.playMusicUrl?.startsWith('local://') ||
+                          song.playMusicUrl?.startsWith('content://') ||
+                          song.playMusicUrl?.startsWith('data:');
+          if (!isLocal) {
             console.info(`歌曲URL已过期，重新获取: ${song.name}`);
             song.playMusicUrl = undefined;
             song.expiredAt = undefined;
@@ -639,18 +645,31 @@ export const usePlaylistStore = defineStore(
           playerCore.playMusic.id === song.id &&
           playerCore.playMusic.playMusicUrl === song.playMusicUrl
         ) {
-          if (playerCore.play) {
+          const { audioService } = await import('@/services/audioService');
+          const sound = audioService.getCurrentSound();
+          // 检查音频是否真正在播放，而非仅依赖 play 标志
+          // (Android 锁屏下 play 可能被延迟，标志为 true 但音频实际暂停)
+          const isActuallyPlaying = sound && !sound.paused && !sound.ended && sound.src;
+          const shouldPause = playerCore.play && isActuallyPlaying;
+
+          if (shouldPause) {
             playerCore.setPlayMusic(false);
-            const { audioService } = await import('@/services/audioService');
-            audioService.getCurrentSound()?.pause();
+            sound?.pause();
             playerCore.userPlayIntent = false;
           } else {
+            // play 标志为 false，或音频实际未播放（如锁屏延迟场景）
+            // 需要真正开始播放
             playerCore.setPlayMusic(true);
             playerCore.userPlayIntent = true;
-            const { audioService } = await import('@/services/audioService');
-            const sound = audioService.getCurrentSound();
-            if (sound) {
-              sound.play();
+            if (sound && sound.src) {
+              sound.play().catch((err) => {
+                console.warn('[PlaylistStore] play() 失败:', err?.name || err);
+                // NotAllowedError: 尝试通过 playTrack 重建
+                if (err instanceof DOMException && err.name === 'NotAllowedError') {
+                  console.log('[PlaylistStore] 通过 playTrack 重建播放');
+                  playerCore.setPlayMusic(false);
+                }
+              });
             } else {
               // No audio instance, rebuild via playTrack
               const { playTrack } = await import('@/services/playbackController');

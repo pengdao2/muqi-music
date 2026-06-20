@@ -172,7 +172,9 @@ export default {
     remoteControlDesc: '设置远程控制功能'
   },
   network: {
-    apiPort: '音乐API端口',
+    apiUrl: '音乐API网址',
+    apiUrlDesc: '设置API服务器地址，格式如 http://ip:port',
+    apiPort: '音乐API端口（桌面端）',
     apiPortDesc: '修改后需要重启应用',
     proxy: '代理设置',
     proxyDesc: '无法访问音乐时可以开启代理',

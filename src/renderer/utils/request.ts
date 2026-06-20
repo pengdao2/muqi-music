@@ -12,12 +12,32 @@ interface CustomAxiosRequestConfig extends InternalAxiosRequestConfig {
   noRetry?: boolean;
 }
 
-const baseURL = window.electron
-  ? `http://${window.location.hostname}:${setData?.musicApiPort}`
-  : `http://${window.location.hostname}:${import.meta.env.VITE_API_PORT || '30488'}`;
+/**
+ * 解析 API 基础 URL
+ * 优先级：Electron 端口 > 用户显式设置 > 本地浏览器 > Android 原生桥接 > 远程默认
+ */
+function resolveBaseUrl(): string {
+  if (window.electron) {
+    return `http://${window.location.hostname}:${setData?.musicApiPort}`;
+  }
+  // 用户显式设置了 API URL → 始终优先
+  if (setData?.musicApiUrl) {
+    return setData.musicApiUrl;
+  }
+  // 桌面 Web 浏览器 → 使用同域
+  if (window.location.hostname) {
+    return `http://${window.location.hostname}:${import.meta.env.VITE_API_PORT || '30488'}`;
+  }
+  // Android 原生 → 使用 Native Bridge（内部实现：用户设置 > 本地:30488 健康检查 > 远程默认）
+  if ((window as any).AndroidBridge?.isNativeApp?.()) {
+    return (window as any).AndroidBridge.getApiUrl();
+  }
+  // 最终降级
+  return 'http://8.134.23.217:30488';
+}
 
 const request = axios.create({
-  baseURL,
+  baseURL: resolveBaseUrl(),
   timeout: 15000,
   withCredentials: true
 });
@@ -31,9 +51,8 @@ const RETRY_DELAY = 500;
 request.interceptors.request.use(
   (config: CustomAxiosRequestConfig) => {
     setData = getSetData();
-    config.baseURL = window.electron
-      ? `http://${window.location.hostname}:${setData?.musicApiPort}`
-      : `http://${window.location.hostname}:${import.meta.env.VITE_API_PORT || '30488'}`;
+    config.baseURL = resolveBaseUrl();
+    console.log('[MuqiNative] resolveBaseUrl ->', config.baseURL, '| url:', config.url);
     // 只在retryCount未定义时初始化为0
     if (config.retryCount === undefined) {
       config.retryCount = 0;

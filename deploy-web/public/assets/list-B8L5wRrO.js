@@ -1,1 +1,0 @@
-import{r as e}from"./index-BAVTO56l.js";function r(t){return e.get("/top/playlist",{params:t})}function s(t){return e.get("/playlist/detail",{params:{id:t}})}function i(t){return e.get("/album",{params:{id:t}})}function n(){return e.get("/toplist")}export{s as a,r as b,n as c,i as g};

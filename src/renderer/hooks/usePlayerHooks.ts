@@ -267,6 +267,12 @@ const parseLyrics = (lyricsString: string): { lyrics: ILyricText[]; times: numbe
 export const loadLrc = async (id: string | number): Promise<ILyric> => {
   try {
     const numericId = typeof id === 'string' ? parseInt(id, 10) : id;
+
+    // 本地音乐（id 为 0 或 NaN 或非数字哈希）没有在线歌词
+    if (!numericId || isNaN(numericId) || numericId <= 0) {
+      return { lrcTimeArray: [], lrcArray: [], hasWordByWord: false };
+    }
+
     let lyricData: any;
 
     if (isElectron) {
@@ -385,8 +391,11 @@ export const useSongDetail = () => {
     }
 
     if (playMusic.expiredAt && playMusic.expiredAt < Date.now()) {
-      // 本地音乐（local:// 协议）不会过期，跳过清除
-      if (!playMusic.playMusicUrl?.startsWith('local://')) {
+      // 本地音乐（local://、content://、data: 协议）不会过期，跳过清除
+      const isLocalUrl = playMusic.playMusicUrl?.startsWith('local://') ||
+                         playMusic.playMusicUrl?.startsWith('content://') ||
+                         playMusic.playMusicUrl?.startsWith('data:');
+      if (!isLocalUrl) {
         console.info(`歌曲已过期，重新获取: ${playMusic.name}`);
         playMusic.playMusicUrl = undefined;
       }
@@ -394,7 +403,10 @@ export const useSongDetail = () => {
 
     try {
       // 本地音乐（local:// 协议）不需要在线解析，跳过 getSongUrl
-      const isLocalMusic = playMusic.playMusicUrl?.startsWith('local://');
+      // Android content:// URI 也不需要在线解析，延迟到 loadAndPlayAudio 中转换为 data URL
+      const isContentUri = playMusic.playMusicUrl?.startsWith('content://');
+      const isLocalMusic = playMusic.playMusicUrl?.startsWith('local://') || isContentUri;
+
       const playMusicUrl =
         playMusic.playMusicUrl ||
         (isLocalMusic ? undefined : await getSongUrl(playMusic.id, playMusic, false, requestId));

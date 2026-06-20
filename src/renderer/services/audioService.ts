@@ -253,27 +253,43 @@ class AudioService {
   private setupEQ() {
     if (this.sourceNode) return; // Already initialized
 
-    if (!isElectron) {
-      console.log('Web环境中跳过EQ设置，避免CORS问题');
-      this.bypass = true;
-      return;
-    }
-
     try {
       this.context = new AudioContext();
-      this.sourceNode = this.context.createMediaElementSource(this.audio);
+
+      // 尝试将 audio 元素连接到 AudioContext
+      // AudioContext 路由的音频在移动端后台更不容易被暂停
+      try {
+        this.sourceNode = this.context.createMediaElementSource(this.audio);
+      } catch (mediaSourceError) {
+        // CORS 或其他原因导致 createMediaElementSource 失败
+        // 回退：AudioContext 不做音频路由，但仍可用于监控和恢复
+        console.warn('[audioService] createMediaElementSource 失败（可能因CORS），使用直通模式:', mediaSourceError);
+        this.sourceNode = null;
+        this.context = null;
+        this.bypass = true;
+
+        // 注册用户交互时自动重新尝试创建 AudioContext
+        this.setupUserInteractionRetry();
+        return;
+      }
+
       this.gainNode = this.context.createGain();
 
-      // Create 10-band filter chain
-      const savedSettings = this.loadEQSettings();
-      this.filters = this.frequencies.map((freq) => {
-        const filter = this.context!.createBiquadFilter();
-        filter.type = 'peaking';
-        filter.frequency.value = freq;
-        filter.Q.value = 1;
-        filter.gain.value = savedSettings[freq.toString()] || 0;
-        return filter;
-      });
+      if (isElectron) {
+        // Electron 环境：创建 10 段 EQ 滤波器链
+        const savedSettings = this.loadEQSettings();
+        this.filters = this.frequencies.map((freq) => {
+          const filter = this.context!.createBiquadFilter();
+          filter.type = 'peaking';
+          filter.frequency.value = freq;
+          filter.Q.value = 1;
+          filter.gain.value = savedSettings[freq.toString()] || 0;
+          return filter;
+        });
+      } else {
+        // Web 环境：不创建 EQ 滤波器，但走 AudioContext 路由以支持后台播放
+        this.bypass = true;
+      }
 
       // Wire up the graph
       this.applyBypassState();
@@ -282,19 +298,53 @@ class AudioService {
       const savedVolume = localStorage.getItem('volume');
       this.applyVolume(savedVolume ? parseFloat(savedVolume) : 1);
 
-      // Monitor context state
+      // Monitor context state（后台恢复关键）
       this.setupContextStateMonitoring();
 
       // Restore saved audio device
       this.restoreSavedAudioDevice();
 
-      console.log('EQ initialization successful');
+      if (isElectron) {
+        console.log('EQ initialization successful');
+      } else {
+        console.log('[audioService] AudioContext 已初始化（后台播放支持）');
+      }
     } catch (error) {
-      console.error('EQ initialization failed:', error);
-      // Fallback: connect audio directly (no EQ)
+      console.error('AudioContext initialization failed:', error);
       this.sourceNode = null;
       this.context = null;
+      this.bypass = true;
     }
+  }
+
+  /**
+   * Web 环境：注册用户交互监听，在用户操作时重试创建 AudioContext
+   * 移动端浏览器要求 AudioContext 必须在用户手势中创建/恢复
+   */
+  private setupUserInteractionRetry() {
+    const retrySetup = () => {
+      if (this.sourceNode) {
+        // 已经成功了，清理监听
+        cleanup();
+        return;
+      }
+      console.log('[audioService] 用户交互检测，重试创建 AudioContext...');
+      this.setupEQ();
+      if (this.sourceNode) {
+        cleanup();
+      }
+    };
+
+    const events = ['click', 'touchstart', 'keydown'] as const;
+    const cleanup = () => {
+      events.forEach((event) => {
+        document.removeEventListener(event, retrySetup, { capture: true });
+      });
+    };
+
+    events.forEach((event) => {
+      document.addEventListener(event, retrySetup, { capture: true, once: false });
+    });
   }
 
   private applyBypassState() {
@@ -496,10 +546,30 @@ class AudioService {
           }
 
           if (isPlay) {
-            this.audio.play().catch((err) => {
-              console.error('Audio play failed:', err);
-              this.emit('playerror', { track, error: err });
-            });
+            const isAndroidNative = !!(window as any).AndroidBridge?.isNativeApp?.();
+            if (!isAndroidNative && (document.hidden || document.visibilityState === 'hidden')) {
+              // 浏览器环境页面隐藏中：不调用 play()（必然被浏览器拒绝），延迟到可见时播放
+              console.log('[audioService] 页面隐藏中，将在可见时自动播放:', track.name);
+              this.setupBackgroundPlayRetry(track);
+            } else {
+              // Android 原生环境或页面可见：直接尝试播放
+              this.audio.play().catch((err) => {
+                const isNotAllowed = err instanceof DOMException && err.name === 'NotAllowedError';
+                if (isNotAllowed) {
+                  if (isAndroidNative) {
+                    // Android 原生：也尝试延迟重试，且标记需要恢复播放
+                    console.warn('[audioService] Android 播放被阻止，启动重试机制');
+                    this.setupBackgroundPlayRetry(track);
+                  } else {
+                    console.warn('[audioService] 播放被阻止，将在用户交互时自动恢复');
+                    this.setupBackgroundPlayRetry(track);
+                  }
+                } else {
+                  console.error('Audio play failed:', err);
+                  this.emit('playerror', { track, error: err });
+                }
+              });
+            }
           }
 
           // Apply volume (use GainNode if available, else direct)
@@ -690,6 +760,123 @@ class AudioService {
         localStorage.removeItem('audioOutputDeviceId');
         this.currentSinkId = 'default';
       }
+    }
+  }
+
+  /**
+   * 后台/隐藏页面延迟播放：
+   * - 页面不可见时只加载音频，不调用 play()
+   * - 页面恢复可见时启动重试循环（每 300ms），直到用户触摸屏幕触发真正播放
+   * - 用户真实交互（pointerdown/touchend/click）时立即尝试
+   */
+  private setupBackgroundPlayRetry(track: SongResult) {
+    let cleaned = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryCount = 0;
+    const MAX_RETRIES = 30; // 30 × 300ms = 9 秒
+    const RETRY_INTERVAL = 300;
+
+    const doPlay = () => {
+      if (cleaned) return;
+      if (!this.currentTrack || this.currentTrack.id !== track.id) {
+        cleanup();
+        return;
+      }
+      if (!this.audio.paused) {
+        cleanup();
+        return;
+      }
+      // 确保音频有 src
+      if (!this.audio.src || this.audio.src === window.location.href) {
+        return; // 音频尚未加载完成，等下次重试
+      }
+
+      this.audio.play().then(() => {
+        console.log('[audioService] 延迟播放成功:', track.name);
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.playbackState = 'playing';
+        }
+        // 同步 Android 通知：播放成功，更新状态
+        const ab = (window as any).AndroidBridge;
+        if (ab?.updatePlaybackState) {
+          ab.updatePlaybackState(true);
+        }
+        cleanup();
+      }).catch((e) => {
+        const isNotAllowed = e instanceof DOMException && e.name === 'NotAllowedError';
+        if (isNotAllowed) {
+          retryCount++;
+          if (retryCount <= MAX_RETRIES) {
+            if (retryTimer) clearTimeout(retryTimer);
+            retryTimer = setTimeout(doPlay, RETRY_INTERVAL);
+          } else {
+            console.warn('[audioService] 重试次数用尽，请手动点击播放');
+            cleanup();
+          }
+        } else {
+          console.warn('[audioService] 延迟播放失败:', e?.name || e);
+          cleanup();
+        }
+      });
+    };
+
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pageshow', onPageShow);
+      ['pointerdown', 'click', 'touchend'].forEach((evt) => {
+        document.removeEventListener(evt, onUserGesture, { capture: true });
+      });
+    };
+
+    // 页面恢复可见：重置计数，启动重试循环
+    const onVisibilityChange = () => {
+      if (!document.hidden && !cleaned) {
+        console.log('[audioService] 页面恢复可见，启动重试循环:', track.name);
+        retryCount = 0;
+        doPlay();
+      }
+    };
+
+    // pageshow（移动端从冻结恢复）
+    const onPageShow = () => {
+      if (!cleaned) {
+        console.log('[audioService] pageshow，重置重试');
+        retryCount = 0;
+        doPlay();
+      }
+    };
+
+    // 用户真实触摸/点击：这是真正的用户手势，立刻重试
+    const onUserGesture = () => {
+      if (!cleaned) {
+        retryCount = 0; // 重置计数，用户手势来了
+        if (retryTimer) {
+          clearTimeout(retryTimer);
+          retryTimer = null;
+        }
+        doPlay();
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pageshow', onPageShow);
+    ['pointerdown', 'click', 'touchend'].forEach((evt) => {
+      document.addEventListener(evt, onUserGesture, { capture: true });
+    });
+
+    // 如果调用时页面已经可见，或者是 Android 原生环境，直接开始重试
+    const isAndroidNative = !!(window as any).AndroidBridge?.isNativeApp?.();
+    if (!document.hidden || isAndroidNative) {
+      console.log('[audioService] 启动重试循环:', track.name, isAndroidNative ? '(Android原生)' : '(页面可见)');
+      doPlay();
+    } else {
+      console.log('[audioService] 页面隐藏，等待可见时播放:', track.name);
     }
   }
 

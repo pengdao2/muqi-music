@@ -197,46 +197,127 @@ onMounted(async () => {
     }
   }
 
-  // 如果没有落雪音源脚本，尝试从默认 URL 拉取
+  // 如果没有落雪音源脚本，尝试从内置 lxmusic 目录批量导入
   const lxMusicScripts = settingsStore.setData?.lxMusicScripts || [];
   if (lxMusicScripts.length === 0) {
-    const defaultScriptUrl = settingsStore.setData?.defaultLxMusicScriptUrl;
-    if (defaultScriptUrl) {
-      console.log('[App] 检测到默认落雪脚本 URL，尝试拉取...');
-      try {
-        const res = await fetch(defaultScriptUrl);
-        if (res.ok) {
-          const scriptContent = await res.text();
+    console.log('[App] 未找到落雪音源脚本，尝试从内置 lxmusic 目录导入...');
+    try {
+      // Android WebView: 使用 Bridge 读取 assets（fetch 无法读取 file:// 本地文件）
+      // Electron/Web: 使用 fetch 读取相对路径
+      const bridge = (window as any).AndroidBridge;
+      const isNative = typeof bridge?.isNativeApp === 'function' && bridge.isNativeApp();
+      const assetBase = isNative ? 'public/lxmusic' : './lxmusic';
+
+      let manifestText: string;
+      if (isNative) {
+        manifestText = bridge.readAssetFile(`${assetBase}/manifest.json`);
+        if (!manifestText) throw new Error('Bridge 返回空');
+      } else {
+        const manifestRes = await fetch(`${assetBase}/manifest.json`);
+        if (!manifestRes.ok) throw new Error(`HTTP ${manifestRes.status}`);
+        manifestText = await manifestRes.text();
+      }
+
+      const fileList: string[] = JSON.parse(manifestText);
+      console.log('[App] 发现内置脚本:', fileList);
+
+      const importedScripts: any[] = [];
+      for (const fileName of fileList) {
+        try {
+          let scriptContent: string;
+          if (isNative) {
+            scriptContent = bridge.readAssetFile(`${assetBase}/${fileName}`);
+            if (!scriptContent) {
+              console.warn(`[App] 跳过无法加载的脚本: ${fileName}`);
+              continue;
+            }
+          } else {
+            const scriptRes = await fetch(`${assetBase}/${fileName}`);
+            if (!scriptRes.ok) {
+              console.warn(`[App] 跳过无法加载的脚本: ${fileName}`);
+              continue;
+            }
+            scriptContent = await scriptRes.text();
+          }
+
+          // 校验脚本头部格式
+          if (!/^\/\*+[\s\S]*?@name/.test(scriptContent)) {
+            console.warn(`[App] 跳过格式不符的脚本: ${fileName}`);
+            continue;
+          }
+
           const scriptInfo = parseScriptInfo(scriptContent);
-          // 先初始化 runner 获取 sources
           const tmpRunner = await initLxMusicRunner(scriptContent);
           const sources = tmpRunner.getSources();
           const sourceKeys = Object.keys(sources);
-          const scriptId = `lx_default_${Date.now()}`;
+          const scriptId = `lx_builtin_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
 
-          const newScript = {
+          importedScripts.push({
             id: scriptId,
-            name: scriptInfo.name || '默认音源',
+            name: scriptInfo.name || fileName,
             script: scriptContent,
             info: scriptInfo,
             sources: sourceKeys,
             enabled: true,
             createdAt: Date.now()
-          };
-
-          settingsStore.setSetData({
-            lxMusicScripts: [newScript],
-            activeLxMusicApiId: scriptId
           });
-
-          // 自动确认（默认脚本）
-          localStorage.setItem(LX_SCRIPT_CONFIRMED_KEY, scriptId);
-          console.log('[App] 默认落雪音源已自动配置:', scriptInfo.name);
-
-          // runner 已在上面初始化，无需再次初始化
+          console.log(`[App] 内置脚本已导入: ${scriptInfo.name}`);
+        } catch (fileErr) {
+          console.warn(`[App] 导入脚本失败 ${fileName}:`, fileErr);
         }
-      } catch (err) {
-        console.warn('[App] 拉取默认落雪脚本失败:', err);
+      }
+
+      if (importedScripts.length > 0) {
+        // 自动激活第一个脚本
+        const activeId = importedScripts[0].id;
+        settingsStore.setSetData({
+          lxMusicScripts: importedScripts,
+          activeLxMusicApiId: activeId
+        });
+        localStorage.setItem(LX_SCRIPT_CONFIRMED_KEY, activeId);
+        console.log(`[App] 内置脚本导入完成，共 ${importedScripts.length} 个，激活: ${importedScripts[0].name}`);
+      }
+    } catch (err) {
+      console.log('[App] 内置 lxmusic 目录不可用，尝试默认 URL...');
+    }
+
+    // 如果内置也没导入成功，尝试从默认 URL 拉取
+    const currentScripts = settingsStore.setData?.lxMusicScripts || [];
+    if (currentScripts.length === 0) {
+      const defaultScriptUrl = settingsStore.setData?.defaultLxMusicScriptUrl;
+      if (defaultScriptUrl) {
+        console.log('[App] 检测到默认落雪脚本 URL，尝试拉取...');
+        try {
+          const res = await fetch(defaultScriptUrl);
+          if (res.ok) {
+            const scriptContent = await res.text();
+            const scriptInfo = parseScriptInfo(scriptContent);
+            const tmpRunner = await initLxMusicRunner(scriptContent);
+            const sources = tmpRunner.getSources();
+            const sourceKeys = Object.keys(sources);
+            const scriptId = `lx_default_${Date.now()}`;
+
+            const newScript = {
+              id: scriptId,
+              name: scriptInfo.name || '默认音源',
+              script: scriptContent,
+              info: scriptInfo,
+              sources: sourceKeys,
+              enabled: true,
+              createdAt: Date.now()
+            };
+
+            settingsStore.setSetData({
+              lxMusicScripts: [newScript],
+              activeLxMusicApiId: scriptId
+            });
+
+            localStorage.setItem(LX_SCRIPT_CONFIRMED_KEY, scriptId);
+            console.log('[App] 默认落雪音源已自动配置:', scriptInfo.name);
+          }
+        } catch (err) {
+          console.warn('[App] 拉取默认落雪脚本失败:', err);
+        }
       }
     }
   }
@@ -252,6 +333,54 @@ onMounted(async () => {
   }
 
   audioService.releaseOperationLock();
+
+  // ====== 移动端后台播放支持 ======
+  // 监听页面可见性变化，防止切后台/锁屏后音频被暂停
+  const handleVisibilityChange = () => {
+    if (document.hidden) {
+      // 页面隐藏时：如果正在播放，主动保持 AudioContext 运行
+      if (playerStore.isPlay) {
+        // 尝试通过 MediaSession 告知系统这是活跃音频
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.playbackState = 'playing';
+        }
+        console.log('[App] 页面隐藏，保持播放状态');
+      }
+    } else {
+      // 页面恢复可见时：检查播放状态，若音频被暂停则恢复
+      if (playerStore.isPlay && playerStore.playMusic) {
+        const audio = audioService.getCurrentSound();
+        if (audio && audio.paused && audio.src) {
+          console.log('[App] 页面恢复可见，尝试恢复播放...');
+          audio.play().catch((err) => {
+            console.warn('[App] 恢复播放失败:', err);
+          });
+        }
+        // 同步 MediaSession 状态
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.playbackState = 'playing';
+        }
+      }
+    }
+  };
+
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+
+  // 额外监听 pageshow/pagehide（处理移动端浏览器冻结页面）
+  const handlePageShow = () => {
+    if (playerStore.isPlay && playerStore.playMusic) {
+      const audio = audioService.getCurrentSound();
+      if (audio && audio.paused && audio.src) {
+        audio.play().catch(() => {});
+      }
+    }
+  };
+  window.addEventListener('pageshow', handlePageShow);
+
+  onUnmounted(() => {
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+    window.removeEventListener('pageshow', handlePageShow);
+  });
 });
 </script>
 

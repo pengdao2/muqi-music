@@ -16,9 +16,9 @@
         </div>
       </div>
 
-      <div v-if="!isComponent && isElectron" class="flex items-center gap-3">
-        <template v-if="!isSelecting">
-          <!-- Sort Controls -->
+      <div v-if="!isComponent" class="flex items-center gap-3">
+        <!-- Sort Controls (Electron only) -->
+        <template v-if="isElectron && !isSelecting">
           <div class="flex items-center bg-gray-100 dark:bg-neutral-800 rounded-full p-1 h-9">
             <button
               v-for="isDesc in [true, false]"
@@ -35,7 +35,10 @@
               {{ isDesc ? t('favorite.descending') : t('favorite.ascending') }}
             </button>
           </div>
+        </template>
 
+        <!-- Batch Download Button -->
+        <template v-if="!isSelecting">
           <button
             class="h-9 px-4 rounded-full bg-primary/10 hover:bg-primary text-primary hover:text-white text-xs font-medium transition-all duration-300 flex items-center gap-1.5"
             @click="startSelect"

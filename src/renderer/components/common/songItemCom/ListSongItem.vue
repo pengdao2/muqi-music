@@ -31,6 +31,9 @@
         }"
         @load="onImageLoad"
       />
+      <div v-else class="song-item-img flex items-center justify-center bg-neutral-100 dark:bg-neutral-800 rounded-lg">
+        <i class="ri-music-fill text-2xl text-neutral-300 dark:text-neutral-600" />
+      </div>
     </template>
 
     <!-- 内容插槽 -->
@@ -68,6 +71,9 @@
             :class="{ 'like-active': isFavorite }"
             @click.stop="onToggleFavorite"
           ></i>
+        </div>
+        <div class="song-item-operating-list-download" @click.stop="onDownload">
+          <i class="iconfont ri-download-2-line"></i>
         </div>
         <div
           class="song-item-operating-list-play bg-gray-300 dark:bg-gray-800 animate__animated"
@@ -137,6 +143,9 @@ const onToggleFavorite = (event: Event) => {
 const onPlayMusic = () => {
   baseItem.value?.playMusicEvent(props.item);
   emit('play', props.item);
+};
+const onDownload = () => {
+  baseItem.value?.downloadMusic?.(props.item);
 };
 </script>
 
@@ -216,6 +225,25 @@ const onPlayMusic = () => {
 
       .like-active {
         color: rgb(239 68 68) !important;
+      }
+    }
+
+    &-download {
+      cursor: pointer;
+      transition-property: transform;
+      transition-duration: 0.15s;
+
+      &:hover {
+        transform: scale(1.1);
+      }
+
+      .iconfont {
+        font-size: 1rem;
+        color: rgb(107 114 128);
+
+        &:hover {
+          color: rgb(34 197 94); /* hover:text-green-500 */
+        }
       }
     }
 

@@ -534,11 +534,11 @@ const quickNavItems = computed(() => {
       show: true
     },
     {
-      key: 'history',
-      label: t('comp.history'),
-      icon: 'ri-history-line',
+      key: 'localMusic',
+      label: t('comp.localMusic'),
+      icon: 'ri-folder-music-fill',
       active: false,
-      action: () => router.push('/history'),
+      action: () => router.push('/local-music'),
       show: true
     }
   ];

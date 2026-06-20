@@ -1,2 +1,0 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["./opencc-BLRoV-9O.js","./index-BU1Iooo8.js"])))=>i.map(i=>d[i]);
-import{u as n,_ as r}from"./index-BU1Iooo8.js";async function o(t){if(!t||t.length===0)return t||[];switch(n().setData?.lyricTranslationEngine||"none"){case"opencc":return(await(await r(()=>import("./opencc-BLRoV-9O.js"),__vite__mapDeps([0,1]),import.meta.url)).ensureOpenccConverter()).translateLines(t);default:return t.map(e=>({...e,trText:e.trText||""}))}}const u={translateLyrics:o};export{u as default,o as translateLyrics};

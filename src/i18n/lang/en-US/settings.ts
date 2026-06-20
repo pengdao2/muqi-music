@@ -175,7 +175,9 @@ export default {
     remoteControlDesc: 'Set remote control function'
   },
   network: {
-    apiPort: 'Music API Port',
+    apiUrl: 'Music API URL',
+    apiUrlDesc: 'Set API server address, e.g. http://ip:port',
+    apiPort: 'Music API Port (Desktop)',
     apiPortDesc: 'Restart required after modification',
     proxy: 'Proxy Settings',
     proxyDesc: 'Enable proxy when unable to access music',

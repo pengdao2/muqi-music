@@ -29,6 +29,7 @@ export const initMusicHook = (store: ReturnType<typeof usePlayerStore>) => {
   setupMusicWatchers();
   setupCorrectionTimeWatcher();
   setupPlayStateWatcher();
+  setupAndroidMediaControls();
 };
 
 // 获取 playerStore 的辅助函数
@@ -393,6 +394,21 @@ const setupAudioListeners = () => {
             // 忽略发送失败
           }
         }
+
+        // === Android 通知栏进度条更新（每 ~1 秒）===
+        if (lyricThrottleCounter % 20 === 0) {
+          const ab = (window as any).AndroidBridge;
+          if (ab?.updatePlaybackPosition) {
+            try {
+              ab.updatePlaybackPosition(
+                Math.round(currentTime * 1000),
+                Math.round((currentSound.duration || 0) * 1000)
+              );
+            } catch {
+              // 忽略发送失败
+            }
+          }
+        }
       } catch (error) {
         console.error('进度更新 interval 出错:', error);
         // 出错时不清除 interval，让下一次 tick 继续尝试
@@ -487,6 +503,10 @@ const setupAudioListeners = () => {
     if (isElectron) {
       window.api.sendSong(cloneDeep(getPlayerStore().playMusic));
     }
+    // Android: 确保前台服务在运行，同步播放状态到通知栏
+    const ab = (window as any).AndroidBridge;
+    if (ab?.requestPlayback) ab.requestPlayback();
+    if (ab?.updatePlaybackState) ab.updatePlaybackState(true);
     // 兜底: 重启后首次点播放时 lrcArray 仍为空则主动加载
     if (lrcArray.value.length === 0 && playMusic.value?.id) {
       ensureLyricsLoaded();
@@ -499,6 +519,9 @@ const setupAudioListeners = () => {
     console.log('音频暂停事件触发');
     getPlayerStore().setPlayMusic(false);
     clearInterval();
+    // Android: 同步暂停状态到通知栏
+    const ab = (window as any).AndroidBridge;
+    if (ab?.updatePlaybackState) ab.updatePlaybackState(false);
     if (isElectron && isLyricWindowOpen.value) {
       sendLyricToWin();
     }
@@ -1070,3 +1093,75 @@ const handleAudioReady = ((event: CustomEvent) => {
 // 先移除再注册，防止重复
 window.removeEventListener('audio-ready', handleAudioReady);
 window.addEventListener('audio-ready', handleAudioReady);
+
+// ==================== Android 通知栏/锁屏媒体控制 ====================
+let androidMediaInitialized = false;
+
+const setupAndroidMediaControls = () => {
+  if (androidMediaInitialized) return;
+  const ab = (window as any).AndroidBridge;
+  if (!ab?.isNativeApp?.()) return; // 非 Android 环境跳过
+  androidMediaInitialized = true;
+
+  // 注册通知按钮回调：原生通知栏按钮 → 前端播放控制
+  (window as any).__muqi_mediaAction = (action: string, seekPos?: number) => {
+    const store = getPlayerStore();
+    switch (action) {
+      case 'play':
+        if (store.playMusic?.id) store.setPlay(store.playMusic);
+        break;
+      case 'pause':
+        store.handlePause();
+        break;
+      case 'next':
+        store.nextPlay();
+        break;
+      case 'prev':
+        store.prevPlay();
+        break;
+      case 'seek':
+        if (typeof seekPos === 'number' && seekPos > 0) {
+          const currentSound = audioService.getCurrentSound();
+          if (currentSound) {
+            audioService.seek(seekPos / 1000); // 原生传的是毫秒，转秒
+          }
+        }
+        break;
+    }
+  };
+
+  // 监听切歌：更新通知栏歌曲信息
+  watch(
+    () => {
+      const pm = getPlayerStore().playMusic;
+      return pm?.id ? `${pm.name || ''}|${pm.ar?.map((a: any) => a.name).join(',') || ''}|${pm.picUrl || ''}` : '';
+    },
+    (info) => {
+      if (!info) return;
+      const pm = getPlayerStore().playMusic;
+      if (!pm) return;
+      const title = pm.name || '未知歌曲';
+      const artist = pm.ar?.map((a: any) => a.name).join(',') || '未知歌手';
+      const picUrl = pm.picUrl || '';
+      ab.updateNotification?.(title, artist, picUrl);
+    }
+  );
+
+  // 监听歌词/全屏播放界面状态 → 同步到原生层（用于返回键优先关闭歌词）
+  watch(
+    () => getPlayerStore().musicFull,
+    (open) => {
+      ab.setMusicFullOpen?.(!!open);
+    },
+    { immediate: true }
+  );
+
+  // 注册原生返回键关闭歌词的回调
+  (window as any).__muqi_closeMusicFull = () => {
+    const store = getPlayerStore();
+    if (store.musicFull) {
+      store.setMusicFull(false);
+    }
+  };
+};
+

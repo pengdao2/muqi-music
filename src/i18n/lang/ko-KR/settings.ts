@@ -174,6 +174,8 @@ export default {
     remoteControlDesc: '원격 제어 기능 설정'
   },
   network: {
+    apiUrl: 'Music API URL',
+    apiUrlDesc: 'API 서버 주소 설정. 예: http://ip:port',
     apiPort: '음악 API 포트',
     apiPortDesc: '수정 후 앱을 재시작해야 합니다',
     proxy: '프록시 설정',

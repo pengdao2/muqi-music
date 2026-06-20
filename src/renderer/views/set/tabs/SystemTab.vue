@@ -1,6 +1,7 @@
 <template>
-  <setting-section v-if="isElectron" :title="t('settings.sections.system')">
+  <setting-section :title="t('settings.sections.system')">
     <setting-item
+      v-if="isElectron"
       :title="t('settings.system.diskCache')"
       :description="t('settings.system.diskCacheDesc')"
     >
@@ -11,6 +12,7 @@
     </setting-item>
 
     <setting-item
+      v-if="isElectron"
       :title="t('settings.system.cacheDirectory')"
       :description="
         setData.diskCacheDir || diskCacheStats.directory || t('settings.system.cacheDirectoryDesc')
@@ -29,6 +31,7 @@
     </setting-item>
 
     <setting-item
+      v-if="isElectron"
       :title="t('settings.system.cacheMaxSize')"
       :description="t('settings.system.cacheMaxSizeDesc')"
     >
@@ -46,6 +49,7 @@
     </setting-item>
 
     <setting-item
+      v-if="isElectron"
       :title="t('settings.system.cleanupPolicy')"
       :description="t('settings.system.cleanupPolicyDesc')"
     >
@@ -57,6 +61,7 @@
     </setting-item>
 
     <setting-item
+      v-if="isElectron"
       :title="t('settings.system.cacheStatus')"
       :description="
         t('settings.system.cacheStatusDesc', {
@@ -84,6 +89,7 @@
     </setting-item>
 
     <setting-item
+      v-if="isElectron"
       :title="t('settings.system.manageDiskCache')"
       :description="t('settings.system.manageDiskCacheDesc')"
     >
@@ -107,6 +113,7 @@
     </setting-item>
 
     <setting-item
+      v-if="isElectron"
       :title="t('settings.system.restart')"
       :description="t('settings.system.restartDesc')"
     >

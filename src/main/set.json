@@ -13,6 +13,7 @@
   "author": "MuqiMusic",
   "authorUrl": "",
   "musicApiPort": 30488,
+  "musicApiUrl": "",
   "closeAction": "ask",
   "musicQuality": "higher",
   "lyricTranslationEngine": "none",

@@ -129,9 +129,9 @@ type SettingSectionConfig = {
 const settingSections: SettingSectionConfig[] = [
   { id: 'basic' },
   { id: 'playback' },
-  { id: 'application', electron: true },
-  { id: 'network', electron: true },
-  { id: 'system', electron: true }
+  { id: 'application' },
+  { id: 'network' },
+  { id: 'system' }
 ];
 
 const navSections = computed(() => {

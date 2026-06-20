@@ -31,6 +31,9 @@
         }"
         @load="onImageLoad"
       />
+      <div v-else class="song-item-img flex items-center justify-center bg-neutral-100 dark:bg-neutral-800 rounded-lg">
+        <i class="ri-music-fill text-2xl text-neutral-300 dark:text-neutral-600" />
+      </div>
     </template>
 
     <!-- 内容插槽 -->

@@ -1,10 +1,12 @@
 {
   "name": "muqi-music-web",
-  "version": "5.1.0",
+  "version": "1.0.0",
   "description": "Muqi Music Player - Web Edition",
-  "private": true,
+  "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.mjs",
+    "start:api": "node server.mjs --api-only",
+    "start:web": "node server.mjs --web-only"
   },
   "dependencies": {
     "netease-cloud-music-api-alger": "^4.30.0"

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MuqiMusic</string>
+    <string name="channel_name">MuqiMusic 播放服务</string>
+    <string name="channel_description">音乐播放通知</string>
+</resources>

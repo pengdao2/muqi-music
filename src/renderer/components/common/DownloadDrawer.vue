@@ -19,6 +19,7 @@ import { computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { useDownloadStore } from '@/store/modules/download';
+import { isElectron } from '@/utils';
 
 const router = useRouter();
 const downloadStore = useDownloadStore();
@@ -30,7 +31,9 @@ const navigateToDownloads = () => {
 };
 
 onMounted(() => {
-  downloadStore.initListeners();
-  downloadStore.loadPersistedQueue();
+  if (isElectron) {
+    downloadStore.initListeners();
+    downloadStore.loadPersistedQueue();
+  }
 });
 </script>

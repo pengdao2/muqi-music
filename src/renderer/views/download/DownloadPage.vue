@@ -362,7 +362,7 @@
     <!-- 下载设置抽屉 -->
     <n-drawer
       :show="showSettingsDrawer"
-      :width="400"
+      :width="drawerWidth"
       placement="right"
       :z-index="3100"
       @update:show="handleDrawerUpdate"
@@ -376,7 +376,11 @@
             </h3>
             <p class="text-xs text-neutral-500 mb-4">{{ t('download.settingsPanel.pathDesc') }}</p>
             <div class="space-y-3">
-              <n-input :value="downloadSettings.path" readonly placeholder="Select path..." />
+              <n-input
+                v-model:value="downloadSettings.path"
+                :readonly="isElectron"
+                :placeholder="isElectron ? 'Select path...' : '输入下载路径'"
+              />
               <div class="flex gap-2">
                 <n-button class="flex-1" @click="selectDownloadPath">{{
                   t('download.settingsPanel.select')
@@ -554,7 +558,7 @@ import { useProgressiveRender } from '@/hooks/useProgressiveRender';
 import { useDownloadStore } from '@/store/modules/download';
 import { usePlayerStore } from '@/store/modules/player';
 import type { SongResult } from '@/types/music';
-import { getImgUrl } from '@/utils';
+import { getImgUrl, isElectron } from '@/utils';
 
 import type { DownloadTask } from '../../../shared/download';
 
@@ -579,6 +583,9 @@ const {
 });
 
 const tabName = ref(downloadStore.downloadingList.length > 0 ? 'downloading' : 'downloaded');
+
+// 响应式抽屉宽度
+const drawerWidth = computed(() => Math.min(400, window.innerWidth - 16));
 
 // ── Status helpers ──────────────────────────────────────────────────────────
 
@@ -664,7 +671,11 @@ const getLocalFilePath = (path: string) => {
 };
 
 const openDirectory = (path: string) => {
-  window.electron.ipcRenderer.send('open-directory', path);
+  if (isElectron) {
+    window.electron.ipcRenderer.send('open-directory', path);
+  } else {
+    message.info(`路径: ${path}`);
+  }
 };
 
 // ── Play music ──────────────────────────────────────────────────────────────
@@ -672,11 +683,15 @@ const openDirectory = (path: string) => {
 const handlePlayMusic = async (item: any) => {
   try {
     const filePath = item.path || item.filePath;
-    const fileExists = await window.electron.ipcRenderer.invoke('check-file-exists', filePath);
 
-    if (!fileExists) {
-      message.error(t('download.delete.fileNotFound', { name: item.displayName || item.filename }));
-      return;
+    if (isElectron) {
+      const fileExists = await window.electron.ipcRenderer.invoke('check-file-exists', filePath);
+      if (!fileExists) {
+        message.error(
+          t('download.delete.fileNotFound', { name: item.displayName || item.filename })
+        );
+        return;
+      }
     }
 
     const song: SongResult = {
@@ -705,7 +720,7 @@ const handlePlayMusic = async (item: any) => {
         picId: 0
       } as any,
       picUrl: item.picUrl,
-      playMusicUrl: getLocalFilePath(filePath),
+      playMusicUrl: isElectron ? getLocalFilePath(filePath) : filePath,
       source: 'netease' as 'netease',
       count: 0
     };
@@ -872,41 +887,67 @@ const formatNamePreview = computed(() => {
 });
 
 const selectDownloadPath = async () => {
-  const result = await window.electron.ipcRenderer.invoke('select-directory');
-  if (result && !result.canceled && result.filePaths.length > 0) {
-    downloadSettings.value.path = result.filePaths[0];
+  if (isElectron) {
+    const result = await window.electron.ipcRenderer.invoke('select-directory');
+    if (result && !result.canceled && result.filePaths.length > 0) {
+      downloadSettings.value.path = result.filePaths[0];
+    }
+    return;
+  }
+  // Android: 使用 SAF 文件夹选择器
+  if ((window as any).AndroidBridge?.selectDownloadDir) {
+    // 注册回调，SAF 选择完成后会调用
+    (window as any).__onDownloadDirSelected = (path: string) => {
+      downloadSettings.value.path = path;
+      localStorage.setItem('downloadPath', path);
+      message.success(`已选择: ${path}`);
+    };
+    (window as any).AndroidBridge.selectDownloadDir();
   }
 };
 
 const openDownloadPath = () => {
-  if (downloadSettings.value.path) {
+  if (isElectron) {
+    if (!downloadSettings.value.path) {
+      message.warning(t('download.settingsPanel.noPathSelected'));
+      return;
+    }
     window.electron.ipcRenderer.send('open-directory', downloadSettings.value.path);
+  } else if ((window as any).AndroidBridge?.openDownloadDir) {
+    (window as any).AndroidBridge.openDownloadDir();
   } else {
-    message.warning(t('download.settingsPanel.noPathSelected'));
+    message.info(`下载路径: ${downloadSettings.value.path || '(未设置)'}`);
   }
 };
 
 const saveDownloadSettings = () => {
-  window.electron.ipcRenderer.send(
-    'set-store-value',
-    'set.downloadPath',
-    downloadSettings.value.path
-  );
-  window.electron.ipcRenderer.send(
-    'set-store-value',
-    'set.downloadNameFormat',
-    downloadSettings.value.nameFormat
-  );
-  window.electron.ipcRenderer.send(
-    'set-store-value',
-    'set.downloadSeparator',
-    downloadSettings.value.separator
-  );
-  window.electron.ipcRenderer.send(
-    'set-store-value',
-    'set.downloadSaveLyric',
-    downloadSettings.value.saveLyric
-  );
+  if (isElectron) {
+    window.electron.ipcRenderer.send(
+      'set-store-value',
+      'set.downloadPath',
+      downloadSettings.value.path
+    );
+    window.electron.ipcRenderer.send(
+      'set-store-value',
+      'set.downloadNameFormat',
+      downloadSettings.value.nameFormat
+    );
+    window.electron.ipcRenderer.send(
+      'set-store-value',
+      'set.downloadSeparator',
+      downloadSettings.value.separator
+    );
+    window.electron.ipcRenderer.send(
+      'set-store-value',
+      'set.downloadSaveLyric',
+      downloadSettings.value.saveLyric
+    );
+  } else {
+    // Web/Android: save to localStorage, 路径也传给 Android 原生层
+    localStorage.setItem('downloadPath', downloadSettings.value.path);
+    localStorage.setItem('downloadNameFormat', downloadSettings.value.nameFormat);
+    localStorage.setItem('downloadSeparator', downloadSettings.value.separator);
+  }
 
   if (tabName.value === 'downloaded') {
     downloadStore.refreshCompleted();
@@ -919,26 +960,43 @@ const saveDownloadSettings = () => {
 };
 
 const initDownloadSettings = async () => {
-  const path = window.electron.ipcRenderer.sendSync('get-store-value', 'set.downloadPath');
-  const nameFormat = window.electron.ipcRenderer.sendSync(
-    'get-store-value',
-    'set.downloadNameFormat'
-  );
-  const separator = window.electron.ipcRenderer.sendSync(
-    'get-store-value',
-    'set.downloadSeparator'
-  );
-  const saveLyric = window.electron.ipcRenderer.sendSync(
-    'get-store-value',
-    'set.downloadSaveLyric'
-  );
+  if (isElectron) {
+    const path = window.electron.ipcRenderer.sendSync('get-store-value', 'set.downloadPath');
+    const nameFormat = window.electron.ipcRenderer.sendSync(
+      'get-store-value',
+      'set.downloadNameFormat'
+    );
+    const separator = window.electron.ipcRenderer.sendSync(
+      'get-store-value',
+      'set.downloadSeparator'
+    );
+    const saveLyric = window.electron.ipcRenderer.sendSync(
+      'get-store-value',
+      'set.downloadSaveLyric'
+    );
 
-  downloadSettings.value = {
-    path: path || (await window.electron.ipcRenderer.invoke('get-downloads-path')),
-    nameFormat: nameFormat || '{songName} - {artistName}',
-    separator: separator || ' - ',
-    saveLyric: saveLyric || false
-  };
+    downloadSettings.value = {
+      path: path || (await window.electron.ipcRenderer.invoke('get-downloads-path')),
+      nameFormat: nameFormat || '{songName} - {artistName}',
+      separator: separator || ' - ',
+      saveLyric: saveLyric || false
+    };
+  } else {
+    // Web/Android: load from localStorage or AndroidBridge
+    let defaultPath = '/sdcard/Download/MuqiMusic';
+    // Android: 从原生获取真实下载路径
+    if ((window as any).AndroidBridge?.getDownloadPath) {
+      try {
+        defaultPath = (window as any).AndroidBridge.getDownloadPath();
+      } catch { /* ignore */ }
+    }
+    downloadSettings.value = {
+      path: localStorage.getItem('downloadPath') || defaultPath,
+      nameFormat: localStorage.getItem('downloadNameFormat') || '{songName} - {artistName}',
+      separator: localStorage.getItem('downloadSeparator') || ' - ',
+      saveLyric: false
+    };
+  }
 
   updateFormatComponents();
 };
@@ -966,8 +1024,10 @@ watch(() => downloadSettings.value.nameFormat, updateFormatComponents);
 // ── Lifecycle & watchers ────────────────────────────────────────────────────
 
 onMounted(() => {
-  downloadStore.initListeners();
-  downloadStore.loadPersistedQueue();
+  if (isElectron) {
+    downloadStore.initListeners();
+    downloadStore.loadPersistedQueue();
+  }
   downloadStore.refreshCompleted();
   initDownloadSettings();
 });

@@ -1,6 +1,7 @@
 <template>
-  <setting-section v-if="isElectron" :title="t('settings.sections.application')">
+  <setting-section :title="t('settings.sections.application')">
     <setting-item
+      v-if="isElectron"
       :title="t('settings.application.closeAction')"
       :description="t('settings.application.closeActionDesc')"
     >
@@ -12,13 +13,14 @@
     </setting-item>
 
     <setting-item
+      v-if="isElectron"
       :title="t('settings.application.shortcut')"
       :description="t('settings.application.shortcutDesc')"
     >
       <s-btn @click="showShortcutModal = true">{{ t('common.configure') }}</s-btn>
     </setting-item>
 
-    <setting-item v-if="isElectron" :title="t('settings.application.download')">
+    <setting-item :title="t('settings.application.download')">
       <template #description>
         <n-switch v-model:value="setData.alwaysShowDownloadButton" class="mr-2">
           <template #checked>{{ t('common.show') }}</template>
@@ -41,7 +43,10 @@
       </template>
     </setting-item>
 
-    <setting-item :title="t('settings.application.downloadPath')">
+    <setting-item
+      v-if="isElectron"
+      :title="t('settings.application.downloadPath')"
+    >
       <template #description>
         <span class="break-all">{{
           setData.downloadPath || t('settings.application.downloadPathDesc')
@@ -56,14 +61,15 @@
     </setting-item>
 
     <setting-item
+      v-if="isElectron"
       :title="t('settings.application.remoteControl')"
       :description="t('settings.application.remoteControlDesc')"
     >
       <s-btn @click="showRemoteControlModal = true">{{ t('common.configure') }}</s-btn>
     </setting-item>
 
-    <shortcut-settings v-model:show="showShortcutModal" @change="handleShortcutsChange" />
-    <remote-control-setting v-model:visible="showRemoteControlModal" />
+    <shortcut-settings v-if="isElectron" v-model:show="showShortcutModal" @change="handleShortcutsChange" />
+    <remote-control-setting v-if="isElectron" v-model:visible="showRemoteControlModal" />
   </setting-section>
 </template>
 

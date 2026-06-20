@@ -1,6 +1,21 @@
 <template>
-  <setting-section v-if="isElectron" :title="t('settings.sections.network')">
+  <setting-section :title="t('settings.sections.network')">
+    <!-- API 网址 (Web/Android) -->
     <setting-item
+      :title="t('settings.network.apiUrl')"
+      :description="t('settings.network.apiUrlDesc')"
+    >
+      <s-input
+        v-model="setData.musicApiUrl"
+        type="text"
+        placeholder="http://ip:port"
+        width="w-[260px] max-md:w-full"
+      />
+    </setting-item>
+
+    <!-- API 端口 (仅 Electron 桌面端) -->
+    <setting-item
+      v-if="isElectron"
       :title="t('settings.network.apiPort')"
       :description="t('settings.network.apiPortDesc')"
     >
@@ -14,6 +29,7 @@
       />
     </setting-item>
 
+    <!-- 代理设置 -->
     <setting-item
       :title="t('settings.network.proxy')"
       :description="t('settings.network.proxyDesc')"
@@ -29,6 +45,7 @@
       </template>
     </setting-item>
 
+    <!-- 真实IP -->
     <setting-item
       :title="t('settings.network.realIP')"
       :description="t('settings.network.realIPDesc')"

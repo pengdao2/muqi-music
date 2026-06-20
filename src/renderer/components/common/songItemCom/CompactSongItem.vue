@@ -80,6 +80,13 @@
           ></i>
         </div>
         <div
+          class="song-item-operating-download"
+          @click.stop="onDownload"
+          :class="{ 'opacity-0': !isHovering }"
+        >
+          <i class="iconfont ri-download-2-line"></i>
+        </div>
+        <div
           class="song-item-operating-play animate__animated"
           :class="{
             'bg-green-600': isPlaying,
@@ -159,6 +166,9 @@ const onPlayMusic = () => {
   emit('play', props.item);
 };
 const onMenuClick = (event: MouseEvent) => baseItem.value?.handleMenuClick(event);
+const onDownload = () => {
+  baseItem.value?.downloadMusic?.(props.item);
+};
 
 // 从useSongItem.ts导入格式化时长和获取时长方法
 const getDuration = (item: SongResult): number => {
@@ -250,6 +260,14 @@ const formatDuration = (ms: number): string => {
       }
       .like-active {
         @apply text-red-500 dark:text-red-500;
+      }
+    }
+
+    .song-item-operating-download {
+      @apply mr-1 cursor-pointer;
+
+      .iconfont {
+        @apply text-base transition text-gray-500 dark:text-gray-400 hover:text-green-500;
       }
     }
 

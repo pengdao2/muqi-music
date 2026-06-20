@@ -1,5 +1,2 @@
-  â€¢ electron-builder  version=25.1.8 os=10.0.26100
-  â€¢ loaded configuration  file=package.json ("build" field)
-  â€¢ skipped dependencies rebuild  reason=npmRebuild is set to false
-  â€¢ packaging       platform=win32 arch=x64 electron=40.10.2 appOutDir=dist\win-unpacked
-  â€¢ updating asar integrity executable resource  executablePath=dist\win-unpacked\AlgerMusicPlayer.exe
+'gradle' ²»ÊÇÄÚ²¿»òÍâ²¿ÃüÁî£¬Ò²²»ÊÇ¿ÉÔËĞĞµÄ³ÌĞò
+»òÅú´¦ÀíÎÄ¼ş¡£

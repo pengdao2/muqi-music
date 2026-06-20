@@ -97,6 +97,8 @@ defineExpose({
   playMusicEvent,
   toggleFavorite,
   handlePlayNext,
+  downloadMusic,
+  downloadLyric,
   playLoading,
   isPlaying,
   isFavorite,

@@ -31,6 +31,9 @@
         }"
         @load="onImageLoad"
       />
+      <div v-else class="song-item-img flex items-center justify-center bg-neutral-100 dark:bg-neutral-800 rounded-lg">
+        <i class="ri-music-fill text-2xl text-neutral-300 dark:text-neutral-600" />
+      </div>
     </template>
 
     <!-- 内容插槽 -->
@@ -69,6 +72,15 @@
             @click.stop="onToggleFavorite"
           ></i>
         </div>
+        <!-- 下载按钮 -->
+        <n-tooltip trigger="hover" :z-index="9999999" :delay="400">
+          <template #trigger>
+            <div class="song-item-operating-download" @click.stop="onDownload">
+              <i class="iconfont ri-download-2-line"></i>
+            </div>
+          </template>
+          {{ t('songItem.menu.download') }}
+        </n-tooltip>
         <n-tooltip v-if="isNext" trigger="hover" :z-index="9999999" :delay="400">
           <template #trigger>
             <div class="song-item-operating-next" @click.stop="onPlayNext">
@@ -150,6 +162,9 @@ const onPlayMusic = () => {
 const onPlayNext = () => {
   baseItem.value?.handlePlayNext();
 };
+const onDownload = () => {
+  baseItem.value?.downloadMusic?.(props.item);
+};
 </script>
 
 <style lang="scss" scoped>
@@ -187,6 +202,14 @@ const onPlayNext = () => {
 
     &-like {
       @apply mr-2 cursor-pointer ml-4 transition-all;
+    }
+
+    &-download {
+      @apply mr-2 cursor-pointer transition-all;
+
+      .iconfont {
+        @apply text-xl transition text-gray-500 dark:text-gray-400 hover:text-primary;
+      }
     }
 
     &-next {

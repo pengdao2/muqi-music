@@ -87,7 +87,8 @@ const layoutRouter = [
       title: 'comp.history',
       icon: 'icon-a-TicketStar',
       keepAlive: true,
-      isMobile: true
+      isMobile: true,
+      hideInSidebar: true
     }
   },
   {
@@ -97,9 +98,7 @@ const layoutRouter = [
       title: 'comp.localMusic',
       icon: 'ri-folder-music-fill',
       keepAlive: true,
-      isMobile: false,
-      electronOnly: true,
-      hideInSidebar: true
+      isMobile: true
     },
     component: () => import('@/views/local-music/index.vue')
   },

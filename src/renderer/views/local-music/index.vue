@@ -4,7 +4,6 @@
       <div class="local-music-content pb-32">
         <!-- Hero Section -->
         <section class="hero-section relative overflow-hidden rounded-tl-2xl">
-          <!-- 背景模糊效果 -->
           <div class="hero-bg absolute inset-0 -top-20">
             <div
               class="absolute inset-0 bg-gradient-to-br from-primary/20 via-transparent to-primary/10 blur-3xl opacity-50 dark:opacity-30"
@@ -14,7 +13,6 @@
             ></div>
           </div>
 
-          <!-- Hero 内容 -->
           <div class="hero-content relative z-10 page-padding-x pt-6 pb-4">
             <div class="flex items-center gap-5">
               <div
@@ -22,7 +20,6 @@
               >
                 <i class="ri-folder-music-fill text-4xl text-primary opacity-80" />
               </div>
-
               <div class="info-content min-w-0">
                 <h1
                   class="text-2xl md:text-3xl font-bold text-neutral-900 dark:text-white tracking-tight"
@@ -30,87 +27,128 @@
                   {{ t('localMusic.title') }}
                 </h1>
                 <p class="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-                  {{ t('localMusic.songCount', { count: localMusicStore.musicList.length }) }}
+                  {{ t('localMusic.songCount', { count: currentList.length }) }}
                 </p>
               </div>
             </div>
           </div>
         </section>
 
-        <!-- Action Bar (Sticky on scroll) -->
+        <!-- Tab Bar + Actions -->
         <section
           class="action-bar sticky top-0 z-20 page-padding-x py-3 md:py-4 bg-white/80 dark:bg-black/80 backdrop-blur-xl border-b border-neutral-100 dark:border-neutral-800/50"
         >
           <div class="flex items-center justify-between gap-4">
-            <!-- 左侧：搜索框 -->
-            <div class="flex-1 max-w-xs">
-              <n-input
-                v-model:value="searchKeyword"
-                :placeholder="t('localMusic.search')"
-                clearable
-                size="small"
-                round
+            <!-- Tabs -->
+            <div class="flex items-center gap-2 bg-neutral-100 dark:bg-neutral-900 p-1 rounded-xl">
+              <button
+                class="px-4 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="
+                  currentTab === 'download'
+                    ? 'bg-white dark:bg-neutral-800 text-primary shadow-sm'
+                    : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'
+                "
+                @click="currentTab = 'download'"
               >
-                <template #prefix>
-                  <i class="ri-search-line text-neutral-400" />
-                </template>
-              </n-input>
+                下载的音乐
+              </button>
+              <button
+                v-if="isElectron"
+                class="px-4 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="
+                  currentTab === 'local'
+                    ? 'bg-white dark:bg-neutral-800 text-primary shadow-sm'
+                    : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'
+                "
+                @click="currentTab = 'local'"
+              >
+                本地文件
+              </button>
             </div>
 
-            <!-- 右侧：操作按钮 -->
+            <!-- 搜索 + 操作 -->
             <div class="flex items-center gap-3">
-              <!-- 播放全部按钮 -->
+              <div class="flex-1 max-w-xs hidden sm:block">
+                <n-input
+                  v-model:value="searchKeyword"
+                  :placeholder="t('localMusic.search')"
+                  clearable
+                  size="small"
+                  round
+                >
+                  <template #prefix>
+                    <i class="ri-search-line text-neutral-400" />
+                  </template>
+                </n-input>
+              </div>
+
               <button
-                v-if="filteredList.length > 0"
-                class="action-btn-pill flex items-center gap-2 px-4 py-2 rounded-full font-semibold text-sm transition-all bg-primary text-white hover:bg-primary/90"
+                v-if="currentList.length > 0"
+                class="flex items-center gap-2 px-4 py-2 rounded-full font-semibold text-sm transition-all bg-primary text-white hover:bg-primary/90"
                 @click="handlePlayAll"
               >
                 <i class="ri-play-fill text-lg" />
                 <span class="hidden md:inline">{{ t('localMusic.playAll') }}</span>
               </button>
 
-              <!-- 扫描按钮 -->
+              <!-- Android: 重新扫描本地目录 -->
               <button
-                class="action-btn-icon w-10 h-10 rounded-full flex items-center justify-center bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-all"
+                v-if="!isElectron"
+                class="w-10 h-10 rounded-full flex items-center justify-center bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-all"
+                :disabled="scanning"
+                @click="handleRescan"
+              >
+                <i class="ri-refresh-line text-lg" :class="{ 'animate-spin': scanning }" />
+              </button>
+
+              <!-- 本地文件: 扫描/添加文件夹 (Electron) -->
+              <button
+                v-if="isElectron && currentTab === 'local'"
+                class="w-10 h-10 rounded-full flex items-center justify-center bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-all"
                 :disabled="localMusicStore.scanning"
                 @click="handleScan"
               >
-                <i
-                  class="ri-refresh-line text-lg"
-                  :class="{ 'animate-spin': localMusicStore.scanning }"
-                />
+                <i class="ri-refresh-line text-lg" :class="{ 'animate-spin': localMusicStore.scanning }" />
               </button>
-
-              <!-- 添加文件夹按钮 -->
               <button
-                class="action-btn-icon w-10 h-10 rounded-full flex items-center justify-center bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-all"
+                v-if="isElectron && currentTab === 'local'"
+                class="w-10 h-10 rounded-full flex items-center justify-center bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-all"
                 @click="handleAddFolder"
               >
                 <i class="ri-folder-add-line text-lg" />
               </button>
-
-              <!-- 文件夹管理按钮 -->
               <button
-                v-if="localMusicStore.folderPaths.length > 0"
-                class="action-btn-icon w-10 h-10 rounded-full flex items-center justify-center bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-all"
+                v-if="isElectron && currentTab === 'local' && localMusicStore.folderPaths.length > 0"
+                class="w-10 h-10 rounded-full flex items-center justify-center bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-all"
                 @click="showFolderManager = true"
               >
                 <i class="ri-folder-settings-line text-lg" />
               </button>
             </div>
           </div>
+
+          <!-- 移动端搜索 -->
+          <div class="sm:hidden mt-3" v-if="currentList.length > 0">
+            <n-input
+              v-model:value="searchKeyword"
+              :placeholder="t('localMusic.search')"
+              clearable
+              size="small"
+              round
+            >
+              <template #prefix>
+                <i class="ri-search-line text-neutral-400" />
+              </template>
+            </n-input>
+          </div>
         </section>
 
-        <!-- 扫描进度提示 -->
-        <section v-if="localMusicStore.scanning" class="page-padding-x mt-6">
-          <div
-            class="flex items-center gap-4 p-4 rounded-2xl bg-primary/5 dark:bg-primary/10 border border-primary/20"
-          >
+        <!-- 扫描进度 -->
+        <section v-if="localMusicStore.scanning && currentTab === 'local'" class="page-padding-x mt-6">
+          <div class="flex items-center gap-4 p-4 rounded-2xl bg-primary/5 dark:bg-primary/10 border border-primary/20">
             <n-spin size="small" />
             <div>
-              <p class="text-sm font-medium text-neutral-900 dark:text-white">
-                {{ t('localMusic.scanning') }}
-              </p>
+              <p class="text-sm font-medium text-neutral-900 dark:text-white">{{ t('localMusic.scanning') }}</p>
               <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
                 {{ t('localMusic.songCount', { count: localMusicStore.scanProgress }) }}
               </p>
@@ -120,14 +158,16 @@
 
         <!-- 歌曲列表 -->
         <section class="list-section page-padding-x mt-6">
-          <!-- 空状态 -->
           <div
-            v-if="!localMusicStore.scanning && filteredList.length === 0"
+            v-if="currentList.length === 0 && !localMusicStore.scanning"
             class="empty-state py-20 text-center"
           >
             <i class="ri-folder-music-fill text-5xl mb-4 text-neutral-200 dark:text-neutral-800" />
-            <p class="text-neutral-400">{{ t('localMusic.emptyState') }}</p>
+            <p class="text-neutral-400">
+              {{ currentTab === 'download' ? '暂无下载的音乐，去歌单中下载吧' : t('localMusic.emptyState') }}
+            </p>
             <button
+              v-if="isElectron && currentTab === 'local'"
               class="mt-6 px-6 py-2 rounded-full bg-primary text-white text-sm font-medium hover:bg-primary/90 transition-all"
               @click="handleAddFolder"
             >
@@ -136,10 +176,9 @@
             </button>
           </div>
 
-          <!-- 歌曲列表 -->
-          <div v-else-if="filteredList.length > 0" class="song-list-container">
+          <div v-else-if="currentList.length > 0" class="song-list-container">
             <song-item
-              v-for="(item, index) in filteredSongResults"
+              v-for="(item, index) in currentList"
               :key="item.id"
               :index="index"
               :item="item"
@@ -151,7 +190,7 @@
     </n-scrollbar>
 
     <!-- 文件夹管理抽屉 -->
-    <n-drawer v-model:show="showFolderManager" :width="400" placement="right">
+    <n-drawer v-if="isElectron" v-model:show="showFolderManager" :width="Math.min(400, window.innerWidth - 16)" placement="right">
       <n-drawer-content :title="t('localMusic.removeFolder')" closable>
         <div class="space-y-3 py-4">
           <div
@@ -161,9 +200,7 @@
           >
             <div class="flex items-center gap-3 min-w-0 flex-1">
               <i class="ri-folder-line text-lg text-primary flex-shrink-0" />
-              <span class="text-sm text-neutral-700 dark:text-neutral-300 truncate">{{
-                folder
-              }}</span>
+              <span class="text-sm text-neutral-700 dark:text-neutral-300 truncate">{{ folder }}</span>
             </div>
             <button
               class="w-8 h-8 rounded-full flex items-center justify-center text-neutral-400 hover:text-red-500 hover:bg-red-500/10 transition-all flex-shrink-0 ml-2"
@@ -172,19 +209,14 @@
               <i class="ri-delete-bin-line" />
             </button>
           </div>
-
-          <!-- 空文件夹列表 -->
           <div v-if="localMusicStore.folderPaths.length === 0" class="text-center py-8">
             <i class="ri-folder-line text-4xl text-neutral-200 dark:text-neutral-800" />
             <p class="text-sm text-neutral-400 mt-2">{{ t('localMusic.emptyState') }}</p>
           </div>
         </div>
-
         <template #footer>
           <n-button type="primary" block @click="handleAddFolder">
-            <template #icon>
-              <i class="ri-folder-add-line" />
-            </template>
+            <template #icon><i class="ri-folder-add-line" /></template>
             {{ t('localMusic.scanFolder') }}
           </n-button>
         </template>
@@ -195,146 +227,202 @@
 
 <script setup lang="ts">
 import { createDiscreteApi } from 'naive-ui';
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import SongItem from '@/components/common/SongItem.vue';
+import { useDownloadStore } from '@/store/modules/download';
 import { useLocalMusicStore } from '@/store/modules/localMusic';
-import { usePlayerStore } from '@/store/modules/player';
+import { usePlayerStore } from '@/store';
 import type { SongResult } from '@/types/music';
+import { isElectron } from '@/utils';
 import { filterByKeyword, toSongResult } from '@/utils/localMusicUtils';
 
-// ==================== Stores ====================
 const { t } = useI18n();
 const { message } = createDiscreteApi(['message']);
 const localMusicStore = useLocalMusicStore();
+const downloadStore = useDownloadStore();
 const playerStore = usePlayerStore();
 
-// ==================== State ====================
-/** 搜索关键词 */
+const currentTab = ref<'download' | 'local'>('download');
 const searchKeyword = ref('');
-/** 文件夹管理抽屉是否显示 */
 const showFolderManager = ref(false);
-
-// ==================== Computed ====================
-/** 根据搜索关键词过滤后的本地音乐列表 */
-const filteredList = computed(() => {
-  return filterByKeyword(localMusicStore.musicList, searchKeyword.value);
-});
-
-/** 将过滤后的列表转换为 SongResult[] 供 SongItem 使用 */
-const filteredSongResults = computed(() => {
-  return filteredList.value.map(toSongResult);
-});
-
-// ==================== Methods ====================
+const scanning = ref(false);
 
 /**
- * 选择并添加文件夹
- * 调用系统文件夹选择对话框
- * dialog.showOpenDialog 返回 { canceled: boolean, filePaths: string[] }
+ * 用稳定的 hash 生成 ID（不会每次 computed 变化）
  */
-async function handleAddFolder(): Promise<void> {
+function stableId(input: string): string {
+  let hash = 0;
+  for (let i = 0; i < input.length; i++) {
+    hash = ((hash << 5) - hash + input.charCodeAt(i)) | 0;
+  }
+  return 'dl_' + (hash >>> 0).toString(16);
+}
+
+/**
+ * 已下载音乐 → SongResult
+ */
+const downloadedSongs = computed<SongResult[]>(() => {
+  return downloadStore.completedList.map((item: any, index: number) => {
+    const artistName = (item.ar || []).map((a: any) => a.name || '').join(', ') || '未知歌手';
+    const songName = item.displayName || item.filename || '未知歌曲';
+    // 优先使用 songInfo.id（真实歌曲 API ID），否则用 filePath 生成稳定 hash
+    const uid = (item.songInfo?.id && item.songInfo.id !== 0)
+      ? String(item.songInfo.id)
+      : (item.id && item.id !== 0)
+        ? String(item.id)
+        : stableId(item.filePath || item.path || `downloaded_${index}`);
+    return {
+      id: uid,
+      name: songName,
+      picUrl: item.picUrl || '',
+      // @ts-ignore - 本地文件需要 filePath 用于读取音频数据
+      filePath: item.filePath || '',
+      ar: (item.ar || [{ name: artistName }]).map((a: any) => ({
+        name: a.name || '',
+        id: 0, picId: 0, img1v1Id: 0, briefDesc: '', picUrl: '',
+        img1v1Url: '', albumSize: 0, alias: [], trans: '',
+        musicSize: 0, topicPerson: 0
+      })),
+      al: {
+        name: '',
+        id: 0, picUrl: item.picUrl || '', pic: 0, picId: 0,
+        type: '', size: 0, blurPicUrl: '', companyId: 0,
+        publishTime: 0, description: '', tags: '', company: '',
+        briefDesc: '', artist: { name: artistName, id: 0, picId: 0, img1v1Id: 0,
+          briefDesc: '', picUrl: '', img1v1Url: '', albumSize: 0, alias: [],
+          trans: '', musicSize: 0, topicPerson: 0 },
+        songs: [], alias: [], status: 0, copyrightId: 0,
+        commentThreadId: '', artists: [], subType: '',
+        transName: null, onSale: false, mark: 0, picId_str: ''
+      },
+      // 优先使用本地 content:// URI（Android 扫描文件），否则由 API 获取在线地址
+      playMusicUrl: (item.playMusicUrl || item.contentUri) as any,
+      source: 'netease' as const,
+      count: 0
+    } as SongResult;
+  });
+});
+
+/**
+ * 本地文件（Electron only）
+ */
+const localFileSongs = computed<SongResult[]>(() => {
+  return filterByKeyword(localMusicStore.musicList, searchKeyword.value).map(toSongResult);
+});
+
+/**
+ * 当前 tab 显示列表
+ */
+const currentList = computed<SongResult[]>(() => {
+  if (currentTab.value === 'local' && isElectron) {
+    return localFileSongs.value;
+  }
+  if (searchKeyword.value) {
+    const kw = searchKeyword.value.toLowerCase();
+    return downloadedSongs.value.filter(
+      (s) => s.name.toLowerCase().includes(kw) ||
+        (s.ar || []).some((a: any) => (a.name || '').toLowerCase().includes(kw))
+    );
+  }
+  return downloadedSongs.value;
+});
+
+// 播放单曲
+const handlePlaySong = async (_song: SongResult) => {
+  try {
+    playerStore.setPlayList(currentList.value);
+  } catch (e) {
+    console.error('播放失败:', e);
+  }
+};
+
+// 播放全部
+const handlePlayAll = async () => {
+  if (currentList.value.length === 0) return;
+  const firstSong = currentList.value[0];
+
+  if (isElectron && currentTab.value === 'local') {
+    const entry = localMusicStore.musicList[0];
+    if (entry) {
+      try {
+        const exists = await window.electron.ipcRenderer.invoke('check-file-exists', entry.filePath);
+        if (!exists) {
+          message.error(t('localMusic.fileNotFound'));
+          return;
+        }
+      } catch { /* ignore */ }
+    }
+  }
+
+  playerStore.setPlayList(currentList.value);
+  try {
+    await playerStore.setPlay(firstSong);
+  } catch (e) {
+    console.error('播放失败:', e);
+  }
+};
+
+// Android: 重新扫描本地目录
+const handleRescan = async () => {
+  if (scanning.value) return;
+  scanning.value = true;
+  try {
+    await downloadStore.refreshCompleted();
+    message.success(t('localMusic.scanComplete') || '扫描完成');
+  } catch (e) {
+    console.error('扫描失败:', e);
+    message.error('扫描失败');
+  } finally {
+    scanning.value = false;
+  }
+};
+
+// 扫描/添加文件夹
+const handleScan = async () => {
+  if (!isElectron) return;
+  if (localMusicStore.folderPaths.length === 0) {
+    await handleAddFolder();
+    return;
+  }
+  await localMusicStore.scanFolders();
+};
+
+const handleAddFolder = async () => {
+  if (!isElectron) return;
   try {
     const result = await window.electron.ipcRenderer.invoke('select-directory');
     if (result && !result.canceled && result.filePaths?.length > 0) {
       localMusicStore.addFolder(result.filePaths[0]);
-      // 添加文件夹后自动触发扫描
       await localMusicStore.scanFolders();
     }
   } catch (error) {
     console.error('选择文件夹失败:', error);
     message.error(String(error));
   }
-}
+};
 
-/**
- * 移除文件夹
- * @param folder 要移除的文件夹路径
- */
-function handleRemoveFolder(folder: string): void {
+const handleRemoveFolder = (folder: string) => {
   localMusicStore.removeFolder(folder);
-}
+};
 
-/**
- * 触发扫描
- */
-async function handleScan(): Promise<void> {
-  if (localMusicStore.folderPaths.length === 0) {
-    // 没有配置文件夹时，引导用户先添加文件夹
-    await handleAddFolder();
-    return;
-  }
-  await localMusicStore.scanFolders();
-}
-
-/**
- * 播放单曲
- * SongItem 内部已通过 playMusicEvent 调用 playerStore.setPlay 触发播放
- * 此处只需设置播放列表上下文，确保上下一首切换正常
- * @param song SongItem 组件 emit 的 SongResult 对象
- */
-async function handlePlaySong(_song: SongResult): Promise<void> {
-  try {
-    // 设置播放列表上下文，确保上下一首切换正常
-    playerStore.setPlayList(filteredSongResults.value);
-  } catch (error) {
-    console.error('播放本地音乐失败:', error);
-  }
-}
-
-/**
- * 播放全部
- * 将完整列表转换为 SongResult[] 后设置为播放列表并从第一首开始播放
- */
-async function handlePlayAll(): Promise<void> {
-  if (filteredSongResults.value.length === 0) return;
-
-  try {
-    const firstSong = filteredSongResults.value[0];
-    const entry = filteredList.value[0];
-
-    // 检查第一首歌文件是否存在
-    const exists = await window.electron.ipcRenderer.invoke('check-file-exists', entry.filePath);
-    if (!exists) {
-      message.error(t('localMusic.fileNotFound'));
-      return;
-    }
-
-    // 设置播放列表并播放第一首
-    playerStore.setPlayList(filteredSongResults.value);
-    await playerStore.setPlay(firstSong);
-  } catch (error) {
-    console.error('播放全部失败:', error);
-  }
-}
-
-// ==================== Lifecycle ====================
 onMounted(async () => {
-  // 进入页面时从 IndexedDB 缓存加载音乐列表
-  await localMusicStore.loadFromCache();
+  downloadStore.refreshCompleted();
+  if (isElectron) {
+    await localMusicStore.loadFromCache();
+  }
+});
+
+watch(currentTab, (val) => {
+  if (val === 'download') {
+    downloadStore.refreshCompleted();
+  }
 });
 </script>
 
 <style scoped>
-/* 虚拟列表样式 */
-.song-virtual-list {
-  @apply w-full;
-}
-
-.song-virtual-list :deep(.n-virtual-list__scroll) {
-  scrollbar-width: thin;
-}
-
-.song-virtual-list :deep(.n-virtual-list__scroll)::-webkit-scrollbar {
-  width: 6px;
-}
-
-.song-virtual-list :deep(.n-virtual-list__scroll)::-webkit-scrollbar-thumb {
-  @apply bg-neutral-300 dark:bg-neutral-700 rounded-full;
-}
-
-.song-virtual-list :deep(.n-virtual-list__scroll)::-webkit-scrollbar-track {
-  @apply bg-transparent;
+.hero-section {
+  min-height: 180px;
 }
 </style>

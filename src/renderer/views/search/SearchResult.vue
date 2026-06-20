@@ -56,12 +56,12 @@
 
               <!-- Batch Actions -->
               <div
-                v-if="isElectron"
+                v-if="searchDetail?.songs?.length > 0"
                 class="h-8 w-[1px] bg-neutral-200 dark:bg-neutral-800 mx-1 hidden md:block"
               ></div>
 
               <button
-                v-if="!isSelecting && isElectron"
+                v-if="!isSelecting && searchDetail?.songs?.length > 0"
                 class="action-btn-icon w-10 h-10 rounded-full flex items-center justify-center bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-all"
                 @click="startSelect"
               >

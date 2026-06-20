@@ -168,6 +168,8 @@ export default {
     remoteControlDesc: '設定遠端控制功能'
   },
   network: {
+    apiUrl: '音樂API網址',
+    apiUrlDesc: '設定API伺服器地址，格式如 http://ip:port',
     apiPort: '音樂API連接埠',
     apiPortDesc: '修改後需要重啟應用程式',
     proxy: '代理設定',

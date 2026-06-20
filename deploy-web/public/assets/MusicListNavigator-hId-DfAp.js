@@ -1,1 +1,0 @@
-import{u as o}from"./music-CL3YqqeJ.js";function f(e,m){const s=o(),{id:i,type:t,name:n,songList:a,listInfo:c,canRemove:u=!1}=m;t!=="dailyRecommend"?a?s.setCurrentMusicList(a,n,c,u):s.setBasicListInfo(n,c,u):s.clearCurrentMusicList(),i?e.push({name:"musicList",params:{id:i},query:{type:t}}):e.push({name:"musicList",query:{type:"dailyRecommend"}})}export{f as n};

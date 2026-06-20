@@ -245,14 +245,15 @@ const resetWorkerState = () => {
   requestCounter = 0;
 };
 
-const initializeScript = async (script: string, scriptInfo: LxScriptInfo) => {
+const initializeScript = (script: string, scriptInfo: LxScriptInfo) => {
   resetWorkerState();
   hardenGlobalScope();
 
   (globalThis as any).lx = createLxApi(scriptInfo);
 
-  // 包装脚本，捕获内部异常并通过 lx.send('inited') 机制上报
-  // 使用 JSON.stringify 安全转义脚本内容，避免脚本中的反引号和 ${} 破坏模板字符串
+  // 使用 (0, eval) 直接执行沙箱脚本
+  // 避免使用 import() + Blob URL，因为 Android WebView file:// 协议下模块 Worker 会被安全策略阻止
+  // JSON.stringify 安全转义脚本内容，避免脚本中的反引号和 ${} 破坏模板字符串
   const sandboxScript = `
     "use strict";
     try {
@@ -263,26 +264,16 @@ const initializeScript = async (script: string, scriptInfo: LxScriptInfo) => {
         sources: {},
         _error: err instanceof Error ? err.message : String(err)
       });
-      throw err;
     }
-    export {};
   `;
-  const scriptUrl = URL.createObjectURL(
-    new Blob([sandboxScript], {
-      type: 'text/javascript'
-    })
-  );
 
   try {
-    await import(/* @vite-ignore */ scriptUrl);
+    (0, eval)(sandboxScript);
     if (!initialized) {
       throw new Error('脚本未调用 lx.send(EVENT_NAMES.inited, data)。请确认脚本格式正确：导入的脚本必须是以 /* @name xxx */ 开头的落雪音乐音源脚本，并在脚本中调用 lx.send(lx.EVENT_NAMES.inited, { sources: {...} })');
     }
   } catch (error) {
-    // 重新抛出以确保主线程能捕获
     throw error;
-  } finally {
-    URL.revokeObjectURL(scriptUrl);
   }
 };
 
