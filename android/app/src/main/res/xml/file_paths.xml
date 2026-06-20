@@ -1,5 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 下载的音乐文件 (主目录) -->
     <external-path name="downloads" path="Download/MuqiMusic" />
+    <!-- 下载的音乐文件 (备用: external-files-path) -->
+    <external-files-path name="downloads_ext" path="Download/MuqiMusic" />
+    <!-- OTA 更新文件 -->
+    <external-files-path name="updates" path="Download" />
+    <!-- 专辑封面缓存 (应用内部缓存) -->
     <cache-path name="albumart" path="albumart" />
+    <!-- 专辑封面缓存 (应用内部文件) -->
+    <files-path name="albumart_files" path="albumart" />
+    <!-- 专辑封面缓存 (外部备用) -->
+    <external-path name="albumart_ext" path="Download/MuqiMusic/albumart" />
+    <!-- 歌词文件目录 -->
+    <external-path name="lrc" path="Download/MuqiMusic/lrc" />
 </paths>
+
+

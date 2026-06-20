@@ -74,8 +74,24 @@
             @scroll="handleScroll"
           >
             <div class="lyrics-padding-top"></div>
+            <!-- 歌词正在加载中 -->
+            <div v-if="lrcArray.length === 0 && isLyricsLoading" class="lyric-line no-lyrics-full">
+              <div class="no-lyrics-icon">
+                <i class="ri-loader-4-line loading-spin"></i>
+              </div>
+              <span>正在搜索歌词...</span>
+              <span class="no-lyrics-hint">本地音乐自动匹配在线歌词</span>
+            </div>
+            <!-- 无歌词数据提示 -->
+            <div v-else-if="lrcArray.length === 0" class="lyric-line no-lyrics-full">
+              <div class="no-lyrics-icon">
+                <i class="ri-file-music-line"></i>
+              </div>
+              <span>{{ t('player.lrc.noLrc') }}</span>
+              <span class="no-lyrics-hint">本地音乐暂无歌词，可联网后重试搜索</span>
+            </div>
             <!-- 无时间戳歌词提示 -->
-            <div v-if="!supportAutoScroll" class="lyric-line no-scroll-tip">
+            <div v-else-if="!supportAutoScroll" class="lyric-line no-scroll-tip">
               <span>{{ t('player.lrc.noAutoScroll') }}</span>
             </div>
             <div
@@ -160,9 +176,15 @@
             </div>
 
             <!-- 歌词区域 -->
-            <div class="lyrics-container" v-if="!config.hideLyrics" @click="showFullLyricScreen">
+            <div class="lyrics-container" v-if="!config.hideLyrics">
               <div v-if="lrcArray.length > 0" class="lyrics-wrapper">
-                <div v-for="(line, idx) in visibleLyrics" :key="idx" class="lyric-line">
+                <div
+                  v-for="(line, idx) in visibleLyrics"
+                  :key="idx"
+                  class="lyric-line"
+                  :class="{ 'now-text': line.originalIndex === nowIndex }"
+                  @click.stop="line.startTime !== -1 ? setAudioTime(line.originalIndex) : showFullLyricScreen()"
+                >
                   <!-- 逐字歌词显示 -->
                   <div
                     v-if="line.hasWordByWord && line.words && line.words.length > 0"
@@ -181,7 +203,7 @@
                   <span v-else>{{ line.text }}</span>
                 </div>
               </div>
-              <div v-else class="no-lyrics">
+              <div v-else class="no-lyrics" @click="showFullLyricScreen">
                 {{ t('player.lrc.noLrc') }}
               </div>
             </div>
@@ -330,7 +352,10 @@
       <div
         v-if="!isLandscape"
         class="unified-controls"
-        :class="{ 'fullscreen-mode': showFullLyrics }"
+        :class="{
+          'fullscreen-mode': showFullLyrics,
+          'lyrics-empty': showFullLyrics && lrcArray.length === 0
+        }"
       >
         <!-- 进度条 (苹果风格) -->
         <div class="progress-container">
@@ -502,6 +527,8 @@ const touchStartY = ref(0);
 const lastScrollTop = ref(0);
 const autoScrollTimer = ref<number | null>(null);
 const isSongChanging = ref(false);
+const isLyricsLoading = ref(false);
+const lyricsLoadTimeout = ref<number | null>(null);
 
 // 横屏检测相关
 const { width, height } = useWindowSize();
@@ -521,9 +548,17 @@ watch(isLandscape, (newVal) => {
 });
 
 // 显示全屏歌词
-// 显示全屏歌词
 const showFullLyricScreen = () => {
   showFullLyrics.value = true;
+
+  // 如果歌词为空，启动加载状态，10秒后超时
+  if (lrcArray.value.length === 0) {
+    isLyricsLoading.value = true;
+    if (lyricsLoadTimeout.value) clearTimeout(lyricsLoadTimeout.value);
+    lyricsLoadTimeout.value = window.setTimeout(() => {
+      isLyricsLoading.value = false;
+    }, 10000);
+  }
 
   // 使用多次延迟尝试滚动，确保能够滚动到当前歌词
   nextTick(() => {
@@ -582,11 +617,12 @@ const scrollToCurrentLyric = (immediate = false, customScrollerRef?: HTMLElement
     const lineRect = activeEl.getBoundingClientRect();
 
     // 优化滚动位置计算，确保当前歌词在视图中央
-    const scrollTop =
+    const scrollTop = Math.max(0,
       scrollerRef.scrollTop +
       (lineRect.top - containerRect.top) -
       containerRect.height / 2 +
-      lineRect.height / 2;
+      lineRect.height / 2
+    );
 
     console.log(`滚动到歌词 #${nowIndex.value}, 位置: ${scrollTop}px`);
 
@@ -628,6 +664,30 @@ watch(showFullLyrics, (newVal) => {
         scrollToCurrentLyric(true);
       }, 300);
     });
+  } else {
+    // 关闭全屏时清理加载状态
+    isLyricsLoading.value = false;
+    if (lyricsLoadTimeout.value) {
+      clearTimeout(lyricsLoadTimeout.value);
+      lyricsLoadTimeout.value = null;
+    }
+  }
+});
+
+// 监听歌词数组变化：歌词加载完成时取消 loading 状态并滚动
+watch(lrcArray, (newArr) => {
+  if (newArr.length > 0 && isLyricsLoading.value) {
+    isLyricsLoading.value = false;
+    if (lyricsLoadTimeout.value) {
+      clearTimeout(lyricsLoadTimeout.value);
+      lyricsLoadTimeout.value = null;
+    }
+    // 歌词加载完成，滚动到当前位置
+    if (showFullLyrics.value) {
+      nextTick(() => {
+        setTimeout(() => scrollToCurrentLyric(true), 300);
+      });
+    }
   }
 });
 
@@ -1603,6 +1663,10 @@ const getWordStyle = (lineIndex: number, _wordIndex: number, word: any) => {
   }
 }
 
+.loading-spin {
+  animation: spin 1s linear infinite;
+}
+
 // 加载动画
 .loading-overlay {
   @apply absolute top-0 left-0 w-full h-full flex items-center justify-center;
@@ -1721,15 +1785,33 @@ const getWordStyle = (lineIndex: number, _wordIndex: number, word: any) => {
 }
 
 // 通用歌词样式
-.lyric-line {
-  @apply cursor-pointer transition-all duration-300 font-medium;
-  font-weight: 500;
-  letter-spacing: var(--lyric-letter-spacing, 0);
-  line-height: var(--lyric-line-height, 1.6);
-  color: var(--text-color-primary);
-  opacity: 0.8;
+  .lyric-line {
+      @apply cursor-pointer transition-all duration-300 font-medium;
+      font-weight: 500;
+      letter-spacing: var(--lyric-letter-spacing, 0);
+      line-height: var(--lyric-line-height, 1.6);
+      color: var(--text-color-primary);
+      opacity: 0.8;
 
-  &.no-scroll-tip {
+      &.no-lyrics-full {
+        @apply flex flex-col items-center justify-center gap-3 py-10 opacity-60 cursor-default;
+        color: var(--text-color-primary);
+        font-weight: normal;
+
+        .no-lyrics-icon {
+          @apply text-4xl opacity-50 mb-2;
+        }
+
+        .no-lyrics-hint {
+          @apply text-sm opacity-40;
+        }
+
+        span {
+          padding-right: 0;
+        }
+      }
+
+      &.no-scroll-tip {
     @apply text-base opacity-60 cursor-default py-2;
     color: var(--text-color-primary);
     font-weight: normal;
@@ -1911,10 +1993,15 @@ const getWordStyle = (lineIndex: number, _wordIndex: number, word: any) => {
     }
   }
 
-  .unified-controls {
-    &.fullscreen-mode {
-      background: linear-gradient(to top, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0) 100%);
-    }
+    .unified-controls {
+      &.fullscreen-mode {
+        background: linear-gradient(to top, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0) 100%);
+
+        // 歌词为空或加载中时，禁用进度条交互（防止误触点到底部进度条导致回退几秒）
+        &.lyrics-empty .apple-style-progress {
+          pointer-events: none;
+        }
+      }
 
     .back-button {
       @apply absolute top-4 left-1/2 -translate-x-1/2 w-10 h-10 flex items-center justify-center bg-black bg-opacity-30 rounded-2xl;
@@ -1934,7 +2021,12 @@ const getWordStyle = (lineIndex: number, _wordIndex: number, word: any) => {
         @apply w-full flex flex-col items-center justify-center;
 
         .lyric-line {
-          @apply text-center py-1 transition-all duration-300 opacity-70;
+          @apply text-center py-1 transition-all duration-300 opacity-70 cursor-pointer;
+
+          &.now-text {
+            @apply text-lg font-medium opacity-100;
+            color: var(--text-color-active);
+          }
 
           &:nth-child(2) {
             @apply text-lg font-medium opacity-100;

@@ -47,7 +47,8 @@ android {
         }
         debug {
             isMinifyEnabled = false
-            applicationIdSuffix = ".debug"
+            // 去掉 .debug 后缀，保持包名一致以便访问之前下载的文件
+            // applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
         }
     }

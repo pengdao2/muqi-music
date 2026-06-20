@@ -137,16 +137,151 @@ const parseLyricsString = async (
             }))
           : undefined,
         hasWordByWord: hasWords,
-        startTime: line.startTime,
-        duration: line.duration
+        startTime: line.startTime,    // 毫秒（与 loadLrc 路径保持一致）
+        duration: line.duration       // 毫秒
       });
 
-      lrcTimeArray.push(line.startTime);
+      // lrcTimeArray 使用秒为单位（与 audioService.seek / HTMLAudioElement.currentTime 一致）
+      lrcTimeArray.push(line.startTime / 1000);
     }
     return { lrcArray, lrcTimeArray, hasWordByWord };
   } catch (error) {
     console.error('解析歌词时发生错误:', error);
     return { lrcArray: [], lrcTimeArray: [], hasWordByWord: false };
+  }
+};
+
+/**
+ * 判断当前播放的音乐是否为 Android 本地音乐
+ * 检测多种可能的标识：content:// URI、data: URI、filePath 属性、非数字 songId
+ */
+const isAndroidLocalMusic = (): boolean => {
+  const url = playMusic.value?.playMusicUrl;
+  if (!url) return false;
+  return typeof url === 'string' && (
+    url.startsWith('content://') ||
+    url.startsWith('data:') ||
+    !!(playMusic.value as any).filePath
+  );
+};
+
+/**
+ * Android/Web 平台本地音乐歌词降级加载
+ * 优先级：.lrc 持久化文件 > localStorage lyric_mapping > 在线搜索（按歌曲名+歌手）
+ */
+const tryLocalLyricFallback = async (songId: string | number, filePath: string) => {
+  try {
+    const ab = (window as any).AndroidBridge;
+    let lrcText = '';
+
+    // 1. 从持久化 .lrc 文件读取（Android 平台）
+    if (ab?.readLyricFile && filePath) {
+      const parts = filePath.replace(/\\/g, '/').split('/');
+      const fullName = parts[parts.length - 1] || filePath;
+      const dotIdx = fullName.lastIndexOf('.');
+      const nameNoExt = dotIdx > 0 ? fullName.substring(0, dotIdx) : fullName;
+      lrcText = ab.readLyricFile(nameNoExt);
+      if (lrcText) {
+        console.log(`[MusicHook] 从 .lrc 文件加载歌词成功: ${nameNoExt} (${lrcText.length} 字符)`);
+      }
+    }
+
+    // 2. 从 localStorage lyric_mapping 读取
+    if (!lrcText) {
+      try {
+        const lyricMap = JSON.parse(localStorage.getItem('lyric_mapping') || '{}');
+        const entry = lyricMap[filePath] || lyricMap[`sid:${songId}`];
+        if (entry) {
+          lrcText = entry.yrc || entry.lyric || '';
+          if (lrcText) {
+            console.log(`[MusicHook] 从 lyric_mapping 加载歌词成功`);
+          }
+        }
+      } catch (e) {
+        console.warn('[MusicHook] 读取 lyric_mapping 失败:', e);
+      }
+    }
+
+    // 3. 在线搜索歌词降级（按歌曲名+歌手从 API 搜索）
+    if (!lrcText && playMusic.value?.name) {
+      try {
+        const keyword = playMusic.value.name;
+        console.log(`[MusicHook] 尝试在线搜索歌词: "${keyword}"`);
+        const { getSearchSongs } = await import('@/api/music');
+        const searchRes = await getSearchSongs({ keywords: keyword, limit: 5 });
+        if (searchRes?.data?.result?.songs?.length > 0) {
+          // 按歌名+歌手匹配最佳结果
+          const songs = searchRes.data.result.songs;
+          const artistNames = (playMusic.value.ar || [])
+            .map((a: any) => a.name || '').join('').toLowerCase();
+          let bestMatch = songs[0];
+          for (const s of songs) {
+            if (s.name?.toLowerCase() === keyword.toLowerCase() &&
+                (!artistNames || (s.ar || []).some((a: any) =>
+                  artistNames.includes((a.name || '').toLowerCase())))) {
+              bestMatch = s;
+              break;
+            }
+          }
+          if (bestMatch?.id) {
+            const { getMusicLrc } = await import('@/api/music');
+            const lrcRes = await getMusicLrc(bestMatch.id);
+            if (lrcRes?.data?.lrc?.lyric) {
+              lrcText = lrcRes.data.lrc.lyric;
+              console.log(`[MusicHook] 在线搜索歌词成功: "${bestMatch.name}" (id: ${bestMatch.id})`);
+              // 持久化保存歌词映射，下次无需搜索
+              try {
+                const lyricMap = JSON.parse(localStorage.getItem('lyric_mapping') || '{}');
+                lyricMap[filePath] = {
+                  songId: bestMatch.id,
+                  lyric: lrcText,
+                  tlyric: lrcRes.data.lrc?.tlyric || '',
+                  yrc: lrcRes.data.lrc?.yrc || '',
+                  savedAt: Date.now()
+                };
+                localStorage.setItem('lyric_mapping', JSON.stringify(lyricMap));
+                // 同时保存为 .lrc 文件
+                if (ab?.saveLyricFile && filePath) {
+                  const parts = filePath.replace(/\\/g, '/').split('/');
+                  const fullName = parts[parts.length - 1] || filePath;
+                  const dotIdx = fullName.lastIndexOf('.');
+                  const nameNoExt = dotIdx > 0 ? fullName.substring(0, dotIdx) : fullName;
+                  ab.saveLyricFile(nameNoExt, lrcText);
+                }
+              } catch { /* 忽略保存失败 */ }
+            }
+          }
+        }
+      } catch (searchErr) {
+        console.error('[MusicHook] 在线搜索歌词失败:', searchErr);
+      }
+    }
+
+    // 解析歌词
+    if (lrcText) {
+      console.log(`[MusicHook] 找到歌词文本 (${lrcText.length} 字符)，开始解析...`);
+      const {
+        lrcArray: parsedLrcArray,
+        lrcTimeArray: parsedTimeArray,
+        hasWordByWord
+      } = await parseLyricsString(lrcText);
+      console.log(`[MusicHook] 歌词解析完成: ${parsedLrcArray.length} 行, 时间戳数组: ${parsedTimeArray.length}, 逐字歌词: ${hasWordByWord}`);
+      lrcArray.value = parsedLrcArray;
+      lrcTimeArray.value = parsedTimeArray;
+      if (playMusic.value.lyric && typeof playMusic.value.lyric === 'object') {
+        (playMusic.value.lyric as any).hasWordByWord = hasWordByWord;
+      }
+    } else {
+      console.log('[MusicHook] 所有歌词加载方式均未找到歌词，lrcArray 保持为空');
+      // 确保前端能显示"暂无歌词"状态
+      lrcArray.value = [];
+      lrcTimeArray.value = [];
+    }
+  } catch (err) {
+    console.error('[MusicHook] tryLocalLyricFallback 失败:', err);
+    // 出错时也要清空，避免残留旧数据
+    lrcArray.value = [];
+    lrcTimeArray.value = [];
   }
 };
 
@@ -187,43 +322,42 @@ const ensureLyricsLoaded = async (force = false) => {
       console.error('翻译歌词失败，使用原始歌词：', e);
       lrcArray.value = rawLrc as any;
     }
-  } else if (isElectron && playMusic.value.playMusicUrl?.startsWith('local:///')) {
+  } else if (playMusic.value.playMusicUrl?.startsWith('local:///')) {
+    // Electron local file
     try {
       let filePath = decodeURIComponent(playMusic.value.playMusicUrl.replace('local:///', ''));
       // 处理 Windows 路径：/C:/... → C:/...
       if (/^\/[a-zA-Z]:\//.test(filePath)) {
         filePath = filePath.slice(1);
       }
-      const embeddedLyrics = await window.api.getEmbeddedLyrics(filePath);
-      if (embeddedLyrics) {
-        const {
-          lrcArray: parsedLrcArray,
-          lrcTimeArray: parsedTimeArray,
-          hasWordByWord
-        } = await parseLyricsString(embeddedLyrics);
-        lrcArray.value = parsedLrcArray;
-        lrcTimeArray.value = parsedTimeArray;
-        if (playMusic.value.lyric && typeof playMusic.value.lyric === 'object') {
-          (playMusic.value.lyric as any).hasWordByWord = hasWordByWord;
-        }
-      } else if (typeof songId === 'number') {
-        try {
-          const { getMusicLrc } = await import('@/api/music');
-          const res = await getMusicLrc(songId);
-          if (res?.data?.lrc?.lyric) {
-            const { lrcArray: apiLrcArray, lrcTimeArray: apiTimeArray } = await parseLyricsString(
-              res.data.lrc.lyric
-            );
-            lrcArray.value = apiLrcArray;
-            lrcTimeArray.value = apiTimeArray;
+      if (isElectron) {
+        const embeddedLyrics = await window.api.getEmbeddedLyrics(filePath);
+        if (embeddedLyrics) {
+          const {
+            lrcArray: parsedLrcArray,
+            lrcTimeArray: parsedTimeArray,
+            hasWordByWord
+          } = await parseLyricsString(embeddedLyrics);
+          lrcArray.value = parsedLrcArray;
+          lrcTimeArray.value = parsedTimeArray;
+          if (playMusic.value.lyric && typeof playMusic.value.lyric === 'object') {
+            (playMusic.value.lyric as any).hasWordByWord = hasWordByWord;
           }
-        } catch (apiErr) {
-          console.error('API lyrics fallback failed:', apiErr);
+        } else {
+          await tryLocalLyricFallback(songId, filePath);
         }
+      } else {
+        // Non-Electron: fallback to .lrc file
+        await tryLocalLyricFallback(songId, filePath);
       }
     } catch (err) {
       console.error('Failed to extract embedded lyrics:', err);
     }
+  } else if (!isElectron && isAndroidLocalMusic()) {
+    // Android local music (content:// URI or data: URL or filePath)
+    const filePath = (playMusic.value as any).filePath || (playMusic.value as any)?.song?.filePath || '';
+    console.log(`[MusicHook] ensureLyricsLoaded: Android本地音乐, songId=${songId}, filePath=${filePath}, playMusicUrl=${playMusic.value.playMusicUrl}`);
+    await tryLocalLyricFallback(songId, filePath);
   } else if (typeof songId === 'number') {
     // 在线歌曲但 lyric 字段尚未加载, 主动调 API 兜底
     try {
@@ -740,12 +874,23 @@ export const useLyricProgress = () => {
   };
 };
 
-// 设置当前播放时间
+// 设置当前播放时间（点击歌词行跳转播放位置）
 export const setAudioTime = (index: number) => {
-  const currentSound = sound.value;
-  if (!currentSound) return;
+  // 优先使用缓存的 sound，回退到 audioService 实时获取
+  let currentSound = sound.value || audioService.getCurrentSound();
+  if (!currentSound) {
+    console.warn('[MusicHook] setAudioTime: 没有可用的音频实例，无法跳转');
+    return;
+  }
 
-  audioService.seek(lrcTimeArray.value[index]);
+  const targetTime = lrcTimeArray.value[index];
+  if (targetTime === undefined || targetTime === null) {
+    console.warn(`[MusicHook] setAudioTime: 索引 ${index} 没有对应的时间戳`);
+    return;
+  }
+
+  console.log(`[MusicHook] setAudioTime: 跳转到索引 ${index}, 时间 ${targetTime.toFixed(1)}秒, 歌词: "${lrcArray.value[index]?.text}"`);
+  audioService.seek(targetTime);
   currentSound.play();
 };
 
